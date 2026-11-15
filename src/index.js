@@ -15,7 +15,8 @@ import { handlePublicData, ownerSummary, ownerList, ownerDeleteRecord, ownerDele
 const MAX_TOTAL = 50 * 1024 * 1024;   // 50MB per site (uncompressed)
 const MAX_FILE = 24 * 1024 * 1024;    // KV limit is 25MiB per value
 const MAX_FILES = 500;                // files per site
-const FREE_SITES = 2;                 // free sites per user; more are bought one by one (admin is unlimited)
+const SITES_PER_PERIOD = 2;           // new sites a user may create per period (admin is unlimited)
+const PERIOD_MONTHS = 4;              // rolling window; deleting a site does NOT give the slot back
 const DAILY_FILES_PER_USER = 300;     // file writes per user per day (protects the free KV quota)
 const SESSION_DAYS = 7;
 const COOKIE = "__Host-shigur";
@@ -218,30 +219,19 @@ async function setUserSites(env, sub, list) {
   else await env.SITES.delete("u:" + sub);
 }
 
-// ---------- plans & payments (manual Bit/PayBox, approved by the admin) ----------
-async function credits(env, sub) {
-  return parseInt((await env.SITES.get("cr:" + sub)) || "0", 10);
-}
-async function paySettings(env) {
-  return (await env.SITES.get("sys:pay", "json")) || { price: 20, phone: "", name: "" };
-}
-function payCode() {
-  const a = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-  return Array.from(crypto.getRandomValues(new Uint8Array(6)), b => a[b % a.length]).join("");
+// ---------- creation limit: 2 new sites per rolling 4 months ----------
+function addMonths(t, m) { const d = new Date(t); d.setMonth(d.getMonth() + m); return d.getTime(); }
+async function creationLog(env, sub) {
+  const log = (await env.SITES.get("cl:" + sub, "json")) || [];
+  const since = addMonths(Date.now(), -PERIOD_MONTHS);
+  return log.filter(t => t > since).sort((a, b) => a - b);
 }
 async function planFor(env, user) {
-  const mine = await userSites(env, user.sub);
-  const cr = await credits(env, user.sub);
-  const pay = await paySettings(env);
-  const code = await env.SITES.get("pu:" + user.sub);
-  let pending = null;
-  if (code) {
-    const r = await env.SITES.get("pr:" + code, "json");
-    if (r) pending = { code, created: r.created };
-  }
+  const recent = await creationLog(env, user.sub);
+  const left = Math.max(0, SITES_PER_PERIOD - recent.length);
   return {
-    used: mine.length, free: FREE_SITES, credits: cr, allowed: user.admin ? null : FREE_SITES + cr,
-    price: pay.price, phone: pay.phone, payName: pay.name, payReady: !!pay.phone, pending,
+    perPeriod: SITES_PER_PERIOD, months: PERIOD_MONTHS, created: recent.length, left,
+    nextAt: left ? null : addMonths(recent[0], PERIOD_MONTHS), unlimited: !!user.admin,
   };
 }
 
@@ -317,10 +307,12 @@ async function handleUpload(req, env, url, user) {
   } else {
     do { slug = randomSlug(); } while (await env.SITES.get("m:" + slug));
   }
+  let recent = null;
   if (!existing && !user.admin) {
-    const allowed = FREE_SITES + (await credits(env, user.sub));
-    if (mine.length >= allowed) {
-      return json({ error: `הגעתם למכסה (${allowed} אתרים). אפשר לקנות אתר נוסף או למחוק אתר ישן.`, needPurchase: true }, 403);
+    recent = await creationLog(env, user.sub);
+    if (recent.length >= SITES_PER_PERIOD) {
+      const next = new Date(addMonths(recent[0], PERIOD_MONTHS)).toLocaleDateString("he-IL", { day: "numeric", month: "long", year: "numeric" });
+      return json({ error: `אפשר ליצור עד ${SITES_PER_PERIOD} אתרים חדשים בכל ${PERIOD_MONTHS} חודשים. האתר הבא יתאפשר ב-${next}. בינתיים אפשר לעדכן אתרים קיימים.`, limit: true }, 403);
     }
   }
 
@@ -338,6 +330,7 @@ async function handleUpload(req, env, url, user) {
     metadata: { name: meta.name, created: meta.created, size: total, count: paths.length, owner, ownerEmail },
   });
   if (owner === user.sub && !mine.includes(slug)) { mine.push(slug); await setUserSites(env, user.sub, mine); }
+  if (recent) { recent.push(Date.now()); await env.SITES.put("cl:" + user.sub, JSON.stringify(recent)); }
 
   return json({ ok: true, slug, url: `${url.origin}/s/${slug}/` });
 }
@@ -502,62 +495,6 @@ export default {
 
       // ----- plan & purchase (any user) -----
       if (p === "/api/me/plan" && req.method === "GET") return json(await planFor(env, user));
-      if (p === "/api/me/purchase" && req.method === "POST") {
-        const pay = await paySettings(env);
-        if (!pay.phone) return json({ error: "התשלום עוד לא הוגדר. נסו מאוחר יותר." }, 503);
-        let code = await env.SITES.get("pu:" + user.sub);
-        if (!code || !(await env.SITES.get("pr:" + code))) {
-          code = payCode();
-          const reqd = { code, sub: user.sub, email: user.email, name: user.name, price: pay.price, created: Date.now() };
-          await env.SITES.put("pr:" + code, JSON.stringify(reqd), { metadata: reqd, expirationTtl: 30 * 86400 });
-          await env.SITES.put("pu:" + user.sub, code, { expirationTtl: 30 * 86400 });
-        }
-        return json(await planFor(env, user));
-      }
-      if (p === "/api/me/purchase" && req.method === "DELETE") {
-        const code = await env.SITES.get("pu:" + user.sub);
-        if (code) { await env.SITES.delete("pr:" + code); await env.SITES.delete("pu:" + user.sub); }
-        return json(await planFor(env, user));
-      }
-
-      // ----- admin: payment settings & approving purchases -----
-      if (p.startsWith("/api/admin/")) {
-        if (!user.admin) return json({ error: "אין הרשאה" }, 403);
-        if (p === "/api/admin/pay" && req.method === "GET") return json(await paySettings(env));
-        if (p === "/api/admin/pay" && req.method === "POST") {
-          let b = {};
-          try { b = await req.json(); } catch {}
-          const price = parseInt(b.price, 10);
-          const phone = String(b.phone || "").replace(/[\s-]/g, "");
-          const name = String(b.name || "").replace(/[\x00-\x1f<>]/g, "").slice(0, 40);
-          if (!(price >= 1 && price <= 1000)) return json({ error: "מחיר לא תקין (1-1000 ₪)" }, 400);
-          if (phone && !/^05\d{8}$/.test(phone)) return json({ error: "מספר טלפון לא תקין (05XXXXXXXX)" }, 400);
-          await env.SITES.put("sys:pay", JSON.stringify({ price, phone, name }));
-          return json({ ok: true, price, phone, name });
-        }
-        if (p === "/api/admin/requests" && req.method === "GET") {
-          const out = [];
-          let cursor;
-          do {
-            const r = await env.SITES.list({ prefix: "pr:", cursor });
-            for (const k of r.keys) if (k.metadata) out.push(k.metadata);
-            cursor = r.list_complete ? null : r.cursor;
-          } while (cursor);
-          out.sort((a, b) => b.created - a.created);
-          return json({ requests: out });
-        }
-        const rm = p.match(/^\/api\/admin\/requests\/([A-Z0-9]{6})\/(approve|reject)$/);
-        if (rm && req.method === "POST") {
-          const r = await env.SITES.get("pr:" + rm[1], "json");
-          if (!r) return json({ error: "הבקשה לא נמצאה" }, 404);
-          if (rm[2] === "approve") await env.SITES.put("cr:" + r.sub, String((await credits(env, r.sub)) + 1));
-          await env.SITES.delete("pr:" + rm[1]);
-          await env.SITES.delete("pu:" + r.sub);
-          return json({ ok: true });
-        }
-        return json({ error: "לא נמצא" }, 404);
-      }
-
       // owner: manage a site's data
       const om = p.match(/^\/api\/sites\/([a-z0-9-]+)\/(data|counters)(?:\/([^/]+))?(?:\/(\d+))?$/);
       if (om) {

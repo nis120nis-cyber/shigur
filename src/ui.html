@@ -76,11 +76,6 @@
   .plan{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:16px}
   .plan .meter{height:8px;background:var(--line);border-radius:99px;overflow:hidden;margin:8px 0}
   .plan .meter i{display:block;height:100%;background:var(--accent)}
-  .buy{background:#142014;border:1px solid #2c4a28;border-radius:12px;padding:14px;margin-top:10px;line-height:1.7}
-  .code{direction:ltr;display:inline-block;font-family:ui-monospace,monospace;font-size:22px;font-weight:700;letter-spacing:3px;color:var(--accent);background:#0b120a;border-radius:8px;padding:4px 12px;margin:4px 0}
-  .reqrow{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:10px 0;border-bottom:1px solid var(--line)}
-  .reqrow:last-child{border-bottom:0}
-  .reqrow .info{flex:1;min-width:160px;font-size:14px}
   .docs{display:block;text-align:center;margin-top:14px;color:var(--accent);font-size:15px}
 </style>
 </head>
@@ -105,22 +100,6 @@
   <div id="mainView" class="hidden">
     <div class="who"><span>מחובר/ת כ-<b id="meName"></b><span id="meAdmin" class="badge hidden">מנהל</span></span><button class="out" id="logout">יציאה</button></div>
     <div id="planBox" class="plan hidden"></div>
-
-    <div id="payAdmin" class="card hidden" style="margin-bottom:16px">
-      <div class="big" style="font-size:17px">💰 תשלומים</div>
-      <div class="small">כל משתמש מקבל 2 אתרים בחינם. כל אתר נוסף בתשלום חד-פעמי, בביט או בפייבוקס. המספר נשמר בשרת בלבד ולא מופיע בקוד הציבורי.</div>
-      <div class="row">
-        <input id="payPrice" class="field" type="number" min="1" max="1000" placeholder="מחיר ₪" style="max-width:110px">
-        <input id="payPhone" class="field" inputmode="tel" placeholder="מספר לביט: 05XXXXXXXX" style="direction:ltr;text-align:right">
-      </div>
-      <div class="row">
-        <input id="payName" class="field" placeholder="השם שיופיע בביט (לא חובה)" maxlength="40">
-        <button class="btn sm" id="paySave">שמירה</button>
-      </div>
-      <div class="status" id="payMsg"></div>
-      <div style="font-weight:700;margin-top:14px">בקשות ממתינות <span class="small" id="reqCount"></span></div>
-      <div id="reqList" class="small">טוען…</div>
-    </div>
 
     <div class="card">
       <div class="drop" id="drop">
@@ -221,8 +200,7 @@ function showMain(me){
   $("meName").textContent = me.name || me.email;
   $("meAdmin").classList.toggle("hidden", !me.admin);
   $("listTitle").textContent = me.admin ? "כל האתרים" : "האתרים שלי";
-  $("payAdmin").classList.toggle("hidden", !me.admin);
-  if (me.admin) loadPayAdmin(); else loadPlan();
+  if (!me.admin) loadPlan(); else $("planBox").classList.add("hidden");
   loadList();
 }
 async function onGoogle(resp){
@@ -338,7 +316,7 @@ $("go").onclick = () => {
       $("result").scrollIntoView({behavior:"smooth", block:"center"});
     } else {
       if (xhr.status === 401) { showLogin(); }
-      if (d.needPurchase) { loadPlan().then(() => $("planBox").scrollIntoView({behavior:"smooth", block:"center"})); }
+      if (d.limit) { loadPlan().then(() => $("planBox").scrollIntoView({behavior:"smooth", block:"center"})); }
       setStatus(d.error || "ההעלאה נכשלה, נסו שוב", true);
       $("go").disabled = false;
     }
@@ -347,71 +325,20 @@ $("go").onclick = () => {
   xhr.send(fd);
 };
 
-/* ---------- plan & purchase (users) ---------- */
+/* ---------- creation limit (users) ---------- */
 function el(tag, cls, text){ const e=document.createElement(tag); if(cls) e.className=cls; if(text!=null) e.textContent=text; return e; }
 async function loadPlan(){
   const r = await api("/api/me/plan");
   const B = $("planBox");
-  if (!r.ok) { B.classList.add("hidden"); return; }
+  if (!r.ok || r.data.unlimited) { B.classList.add("hidden"); return; }
   const d = r.data; B.innerHTML = ""; B.classList.remove("hidden");
-  B.appendChild(el("div", null, "השתמשת ב-" + d.used + " מתוך " + d.allowed + " אתרים" + (d.credits ? " (" + d.free + " חינם + " + d.credits + " שנקנו)" : " חינמיים")));
-  const m = el("div","meter"); const i = el("i"); i.style.width = Math.min(100, d.used / Math.max(1,d.allowed) * 100) + "%"; m.appendChild(i); B.appendChild(m);
-  if (d.used < d.allowed && !d.pending) return;
-  const box = el("div","buy");
-  if (d.pending) {
-    box.appendChild(el("div", null, "📲 כדי לקבל אתר נוסף, העבירו " + d.price + " ₪ בביט או בפייבוקס"));
-    const ph = el("div"); ph.style.direction="ltr"; ph.style.textAlign="right"; ph.style.fontWeight="700"; ph.style.fontSize="18px"; ph.textContent = d.phone.replace(/^(\d{3})(\d{7})$/,"$1-$2") + (d.payName ? "  (" + d.payName + ")" : "");
-    box.appendChild(ph);
-    box.appendChild(el("div", null, "וכתבו בהערה את הקוד:"));
-    box.appendChild(el("span","code", d.pending.code));
-    box.appendChild(el("div","small","אחרי שהמנהל יראה את ההעברה ויאשר, תוכלו להעלות אתר נוסף. בדרך כלל זה לוקח עד כמה שעות."));
-    const row = el("div","row");
-    const c1 = el("button","btn sm","העתקת מספר"); c1.onclick = e => copy(d.phone, e.target);
-    const c2 = el("button","btn sm ghost","העתקת קוד"); c2.onclick = e => copy(d.pending.code, e.target);
-    const rf = el("button","btn sm ghost","🔄 בדיקת סטטוס"); rf.onclick = loadPlan;
-    const cx = el("button","btn sm ghost danger","ביטול");
-    cx.onclick = () => confirmBtn(cx, "לבטל את הבקשה?", async () => { await api("/api/me/purchase",{method:"DELETE"}); loadPlan(); });
-    row.append(c1, c2, rf, cx); box.appendChild(row);
-  } else if (d.payReady) {
-    box.appendChild(el("div", null, "הגעת למכסת האתרים. רוצה עוד אתר?"));
-    const b = el("button","btn","לקנות אתר נוסף · " + d.price + " ₪ (תשלום חד-פעמי)"); b.style.marginTop = "8px";
-    b.onclick = async () => { b.disabled = true; const r = await api("/api/me/purchase",{method:"POST"}); if (!r.ok) { b.disabled=false; b.textContent = r.data.error || "שגיאה"; } else loadPlan(); };
-    box.appendChild(b);
-    box.appendChild(el("div","small","אפשר גם למחוק אתר ישן כדי לפנות מקום."));
-  } else {
-    box.appendChild(el("div", null, "הגעת למכסת האתרים החינמיים. אפשר למחוק אתר ישן כדי לפנות מקום."));
-  }
-  B.appendChild(box);
-}
-
-/* ---------- payments (admin) ---------- */
-async function loadPayAdmin(){
-  const s = await api("/api/admin/pay");
-  if (s.ok) { $("payPrice").value = s.data.price; $("payPhone").value = s.data.phone; $("payName").value = s.data.name || ""; }
-  const r = await api("/api/admin/requests");
-  const L = $("reqList"); L.innerHTML = "";
-  const reqs = (r.data && r.data.requests) || [];
-  $("reqCount").textContent = reqs.length ? "(" + reqs.length + ")" : "";
-  if (!reqs.length) { L.textContent = "אין בקשות ממתינות"; return; }
-  for (const q of reqs) {
-    const row = el("div","reqrow");
-    const info = el("div","info");
-    info.appendChild(el("div", null, (q.name || "") + " · " + q.price + " ₪"));
-    const em = el("div","small", q.email); em.style.direction="ltr"; em.style.textAlign="right"; info.appendChild(em);
-    info.appendChild(el("span","code", q.code));
-    info.appendChild(el("div","small", new Date(q.created).toLocaleString("he-IL")));
-    const ok = el("button","btn sm","✓ קיבלתי, אשר");
-    ok.onclick = () => confirmBtn(ok, "ראית את ההעברה בביט?", async () => { await api("/api/admin/requests/" + q.code + "/approve",{method:"POST"}); loadPayAdmin(); });
-    const no = el("button","btn sm ghost danger","✗ דחה");
-    no.onclick = () => confirmBtn(no, "לדחות?", async () => { await api("/api/admin/requests/" + q.code + "/reject",{method:"POST"}); loadPayAdmin(); });
-    row.append(info, ok, no); L.appendChild(row);
+  B.appendChild(el("div", null, "יצרת " + d.created + " מתוך " + d.perPeriod + " אתרים חדשים ב-" + d.months + " החודשים האחרונים"));
+  const m = el("div","meter"); const i = el("i"); i.style.width = (d.created / d.perPeriod * 100) + "%"; m.appendChild(i); B.appendChild(m);
+  if (!d.left) {
+    const next = new Date(d.nextAt).toLocaleDateString("he-IL",{day:"numeric",month:"long",year:"numeric"});
+    B.appendChild(el("div","small","אתר חדש יתאפשר ב-" + next + ". בינתיים אפשר לעדכן את האתרים הקיימים עם כפתור \"עדכון\"."));
   }
 }
-$("paySave").onclick = async () => {
-  $("payMsg").className = "status"; $("payMsg").textContent = "";
-  const r = await api("/api/admin/pay",{method:"POST", headers:{"content-type":"application/json"}, body: JSON.stringify({price: $("payPrice").value, phone: $("payPhone").value, name: $("payName").value})});
-  if (r.ok) $("payMsg").textContent = "נשמר ✅"; else { $("payMsg").textContent = r.data.error || "שגיאה"; $("payMsg").className = "status err"; }
-};
 
 /* ---------- site data panel ---------- */
 const fmtTime = t => new Date(t).toLocaleString("he-IL",{day:"numeric",month:"numeric",hour:"2-digit",minute:"2-digit"});
