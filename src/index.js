@@ -1,5 +1,6 @@
 import { unzipSync } from "fflate";
 import UI_HTML from "./ui.html";
+import { PRIVACY, TERMS } from "./legal.js";
 
 // =====================================================================
 //  שיגור — upload files, get a live website
@@ -413,7 +414,10 @@ export default {
     }
 
     if (p === "/" && req.method === "GET") return adminPage(env);
-    if (p === "/robots.txt") return new Response("User-agent: *\nDisallow: /\nAllow: /s/\n", { headers: { "content-type": "text/plain" } });
+    if (p === "/privacy" || p === "/terms") {
+      return new Response(p === "/privacy" ? PRIVACY : TERMS, { headers: { "content-type": "text/html; charset=utf-8", "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'", ...BASE_SEC, "x-robots-tag": "index" } });
+    }
+    if (p === "/robots.txt") return new Response("User-agent: *\nDisallow: /\nAllow: /s/\nAllow: /privacy\nAllow: /terms\n", { headers: { "content-type": "text/plain" } });
 
     if (p.startsWith("/api/")) {
       if (p === "/api/status" && req.method === "GET") {
