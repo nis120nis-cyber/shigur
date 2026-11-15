@@ -70,8 +70,8 @@
   <p class="sub">מעלים קבצים — מקבלים אתר אמיתי עם קישור שכל אחד יכול לפתוח.</p>
 
   <div id="setup" class="warn hidden">
-    האתר עדיין לא מוגדר: צריך להוסיף סיסמת העלאה בשם <b>UPLOAD_KEY</b> בהגדרות ה-Worker ב-Cloudflare
-    (Settings ← Variables and Secrets). אחרי זה רעננו את הדף.
+    האתר עדיין לא מוגדר: צריך להוסיף סיסמת העלאה בשם <b>UPLOAD_KEY</b> (לפחות 12 תווים) בהגדרות ה-Worker ב-Cloudflare
+    (Settings ← Variables and Secrets, מסוג Secret). אחרי זה רעננו את הדף.
   </div>
 
   <!-- login -->
@@ -129,8 +129,6 @@
 <script>
 const $ = id => document.getElementById(id);
 const ORIGIN = location.origin;
-let KEY = "";
-try { KEY = localStorage.getItem("shigur_key") || ""; } catch(e) {}
 let picked = [];      // [{file, path}]
 let replaceSlug = null;
 
@@ -138,8 +136,10 @@ const fmtSize = n => n > 1048576 ? (n/1048576).toFixed(1)+" MB" : Math.max(1,Mat
 const fmtDate = t => t ? new Date(t).toLocaleDateString("he-IL",{day:"numeric",month:"short",year:"numeric"}) : "";
 function setStatus(m, err){ const s=$("status"); s.textContent=m||""; s.className="status"+(err?" err":""); }
 async function api(path, opts={}) {
-  opts.headers = Object.assign({ "x-key": KEY }, opts.headers||{});
+  opts.headers = Object.assign({ "x-shigur": "1" }, opts.headers||{});
+  opts.credentials = "same-origin";
   const r = await fetch(path, opts);
+  if (r.status === 401 && !path.startsWith("/api/login")) showLogin();
   let data = {}; try { data = await r.json(); } catch(e){}
   return { ok: r.ok, status: r.status, data };
 }
@@ -152,24 +152,27 @@ async function copy(text, btn){
 /* ---------- start ---------- */
 $("pre").textContent = ORIGIN.replace(/^https?:\/\//,"") + "/s/";
 (async () => {
-  const s = await (await fetch("/api/status")).json().catch(()=>({ready:false}));
+  let s = {ready:false};
+  try { s = await (await fetch("/api/status", {credentials:"same-origin"})).json(); } catch(e) {}
   if (!s.ready) { $("setup").classList.remove("hidden"); return; }
-  if (KEY && (await api("/api/check",{method:"POST"})).ok) showMain(); else showLogin();
+  if (s.loggedIn) showMain(); else showLogin();
 })();
 
 function showLogin(){ $("loginView").classList.remove("hidden"); $("mainView").classList.add("hidden"); $("pw").focus(); }
 function showMain(){ $("loginView").classList.add("hidden"); $("mainView").classList.remove("hidden"); loadList(); }
 
 async function doLogin(){
-  KEY = $("pw").value.trim();
-  $("loginErr").textContent = "";
-  const r = await api("/api/check",{method:"POST"});
-  if (r.ok) { try{localStorage.setItem("shigur_key",KEY);}catch(e){} showMain(); }
-  else $("loginErr").textContent = "סיסמה שגויה";
+  const pw = $("pw").value;
+  if (!pw) return;
+  $("loginErr").textContent = ""; $("loginBtn").disabled = true;
+  const r = await api("/api/login",{method:"POST", headers:{"content-type":"application/json"}, body: JSON.stringify({password: pw})});
+  $("loginBtn").disabled = false; $("pw").value = "";
+  if (r.ok) showMain();
+  else $("loginErr").textContent = r.data.error || "הכניסה נכשלה";
 }
 $("loginBtn").onclick = doLogin;
 $("pw").addEventListener("keydown", e => { if (e.key === "Enter") doLogin(); });
-$("logout").onclick = () => { try{localStorage.removeItem("shigur_key");}catch(e){} KEY=""; showLogin(); };
+$("logout").onclick = async () => { await api("/api/logout",{method:"POST"}); showLogin(); };
 
 /* ---------- picking files ---------- */
 $("pickFiles").onclick = () => $("fileInput").click();
@@ -232,8 +235,8 @@ function checkSlug(){
   if (replaceSlug && s === replaceSlug) { h.textContent = "מעדכן את האתר הקיים בכתובת הזו"; h.className="hint ok"; slugFree = true; return; }
   h.textContent = "בודק…"; h.className = "hint";
   slugTimer = setTimeout(async () => {
-    const r = await (await fetch("/api/slug?s="+encodeURIComponent(s))).json().catch(()=>null);
-    if (!r || toSlug($("slug").value) !== s) return;
+    const r = (await api("/api/slug?s="+encodeURIComponent(s))).data;
+    if (!r || r.free === undefined || toSlug($("slug").value) !== s) return;
     slugFree = r.free;
     h.textContent = r.free ? "✓ הכתובת פנויה: " + ORIGIN + "/s/" + s + "/" : "✗ הכתובת תפוסה, נסו אחרת";
     h.className = "hint " + (r.free ? "ok" : "bad");
@@ -258,7 +261,8 @@ $("go").onclick = () => {
   bar.style.display = "block"; fill.style.width = "0";
   const xhr = new XMLHttpRequest();
   xhr.open("POST", "/api/upload");
-  xhr.setRequestHeader("x-key", KEY);
+  xhr.setRequestHeader("x-shigur", "1");
+  xhr.withCredentials = true;
   xhr.upload.onprogress = e => { if (e.lengthComputable) { const p = Math.round(e.loaded/e.total*95); fill.style.width = p+"%"; setStatus(p < 95 ? "מעלה… "+p+"%" : "שומר את האתר…"); } };
   xhr.onload = () => {
     bar.style.display = "none";

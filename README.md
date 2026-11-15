@@ -7,6 +7,7 @@
 - כל אחד יכול לפתוח את הקישור, גם בלי חשבון
 - אפשר לעדכן אתר קיים (אותה כתובת) או למחוק אותו
 - רק מי שיודע את הסיסמה יכול להעלות
+- מאובטח: נעילה אחרי 5 ניסיונות שגויים, עוגיות מוצפנות, הגנת CSRF, ובידוד מלא של האתרים המתארחים. פירוט ב-[SECURITY.md](SECURITY.md)
 
 רץ על Cloudflare Workers + KV, בחינם.
 
@@ -18,7 +19,7 @@
 3. בתוך ה-Worker: **Settings** ← **Variables and Secrets** ← **Add**:
    - Type: **Secret**
    - Name: `UPLOAD_KEY`
-   - Value: הסיסמה שתרצו להעלאה
+   - Value: סיסמה חזקה, **לפחות 12 תווים** (מומלץ 16+)
    ← **Deploy**
 4. פותחים את הכתובת `https://shigur.<השם-שלכם>.workers.dev`, נכנסים עם הסיסמה ומשגרים.
 
@@ -28,12 +29,13 @@
 ב-Worker: **Settings** ← **Domains & Routes** ← **Add** ← **Custom domain**.
 
 ## מגבלות
+- אתרים מתארחים רצים בארגז חול, ולכן localStorage ו-cookies לא זמינים בהם
 - עד 50MB ועד 500 קבצים לאתר, ועד 24MB לקובץ בודד
 - בתוכנית החינמית של Cloudflare: עד 1,000 שמירות קבצים ביום (כל קובץ באתר נחשב שמירה אחת) ו-100,000 צפיות בקבצים ביום
 
 ## פיתוח מקומי
 ```
 npm install
-echo 'UPLOAD_KEY="test"' > .dev.vars
+echo 'UPLOAD_KEY="local-test-password"' > .dev.vars
 npm run dev
 ```
