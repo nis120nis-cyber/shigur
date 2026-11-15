@@ -1,6 +1,7 @@
 import { unzipSync } from "fflate";
 import UI_HTML from "./ui.html";
 import { PRIVACY, TERMS, DOCS } from "./legal.js";
+import { handleAiEdit, handleUndo, getKey, keyLooksValid, isEditable, AI_PER_DAY } from "./ai.js";
 import { handlePublicData, ownerSummary, ownerList, ownerDeleteRecord, ownerDeleteCollection, ownerResetCounter, deleteSiteData, NAME_OK, SDK } from "./data.js";
 
 // =====================================================================
@@ -204,7 +205,7 @@ function normalize(files) {
   }
   if (!files["index.html"]) {
     const htmls = paths.filter(p => /\.html?$/i.test(p) && !p.includes("/"));
-    if (htmls.length === 1) files["index.html"] = files[htmls[0]];
+    if (htmls.length === 1) { files["index.html"] = files[htmls[0]]; delete files[htmls[0]]; }
   }
   return files;
 }
@@ -313,7 +314,10 @@ async function handleUpload(req, env, url, user) {
 }
 
 async function deleteFiles(env, slug, meta) {
-  for (const p of meta.files || []) await env.SITES.delete(`f:${slug}:${p}`);
+  for (const p of meta.files || []) {
+    await env.SITES.delete(`f:${slug}:${p}`);
+    if (isEditable(p)) await env.SITES.delete(`bk:${slug}:${p}`);
+  }
 }
 
 async function deleteSite(env, slug, user) {
@@ -439,7 +443,7 @@ export default {
           const s = await readSession(env, getCookie(req, COOKIE));
           if (s && !(await env.SITES.get("ban:" + s.sub))) me = { name: s.name, email: s.email, admin: await isAdmin(env, s.email) };
         }
-        return json({ ready, me });
+        return json({ ready, me, ai: me ? !!(await getKey(env)) : false, aiPerDay: AI_PER_DAY });
       }
       if (!ready) return json({ error: "האתר לא מוגדר" }, 503);
 
@@ -468,6 +472,45 @@ export default {
       if (del && req.method === "DELETE") {
         const r = await deleteSite(env, del[1], user);
         return json(r.ok ? { ok: true } : { error: r.status === 403 ? "זה לא האתר שלך" : "לא נמצא" }, r.ok ? 200 : r.status);
+      }
+
+      // admin: settings (AI key) — the key is write-only, never sent back
+      if (p === "/api/settings") {
+        if (!user.admin) return json({ error: "אין הרשאה" }, 403);
+        if (req.method === "GET") {
+          const k = await getKey(env);
+          return json({ aiConfigured: !!k, hint: k ? "…" + k.slice(-4) : "" });
+        }
+        if (req.method === "POST") {
+          let body = {};
+          try { body = await req.json(); } catch {}
+          const k = String(body.anthropicKey || "").trim();
+          if (!k) { await env.SITES.delete("sys:anthropic"); return json({ ok: true, aiConfigured: false }); }
+          if (!keyLooksValid(k)) return json({ error: "זה לא נראה כמו מפתח של Anthropic (מתחיל ב-sk-ant-)" }, 400);
+          await env.SITES.put("sys:anthropic", k);
+          return json({ ok: true, aiConfigured: true, hint: "…" + k.slice(-4) });
+        }
+      }
+
+      // owner: AI editing, undo, list editable files
+      const am = p.match(/^\/api\/sites\/([a-z0-9-]+)\/(ai|undo|files)$/);
+      if (am) {
+        const [, slug, what] = am;
+        const meta = await env.SITES.get("m:" + slug, "json");
+        if (!meta) return json({ error: "לא נמצא" }, 404);
+        if (meta.owner !== user.sub && !user.admin) return json({ error: "זה לא האתר שלך" }, 403);
+        if (what === "files" && req.method === "GET") {
+          const files = meta.files.filter(isEditable).sort((a, b) => (a === "index.html" ? -1 : b === "index.html" ? 1 : a.localeCompare(b)));
+          const undo = {};
+          for (const f of files) undo[f] = !!(await env.SITES.get(`bk:${slug}:${f}`));
+          return json({ files, undo });
+        }
+        if (req.method === "POST") {
+          if (!sameOrigin(req, url)) return json({ error: "בקשה נדחתה" }, 403);
+          const r = what === "ai" ? await handleAiEdit(req, env, url, user, slug, meta, typeOf) : await handleUndo(req, env, slug, meta, typeOf);
+          return json(r.body, r.status);
+        }
+        return json({ error: "לא נמצא" }, 404);
       }
 
       // owner: manage a site's data

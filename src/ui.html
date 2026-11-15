@@ -73,6 +73,12 @@
   .datap .row2:last-child{border-bottom:0}
   .rec{direction:ltr;text-align:left;font-family:ui-monospace,monospace;font-size:12px;white-space:pre-wrap;word-break:break-word;flex:1;color:var(--text)}
   .lnk{color:var(--accent);background:none;border:0;padding:0;font-size:14px;text-decoration:underline}
+  .aip textarea{width:100%;min-height:90px;background:var(--bg);border:1px solid var(--line);color:var(--text);border-radius:10px;padding:10px;font:inherit;font-size:15px;resize:vertical}
+  .aip select{width:100%;background:var(--bg);border:1px solid var(--line);color:var(--text);border-radius:10px;padding:9px;font:inherit;margin-bottom:8px}
+  .aip .sum{background:#142014;border:1px solid #2c4a28;border-radius:10px;padding:10px;margin-top:10px;line-height:1.6}
+  .aip .chips{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0}
+  .aip .chip{background:var(--bg);border:1px solid var(--line);color:var(--muted);border-radius:99px;padding:5px 10px;font-size:13px;cursor:pointer}
+  .settings{margin-top:14px}
   .docs{display:block;text-align:center;margin-top:14px;color:var(--accent);font-size:15px}
 </style>
 </head>
@@ -124,6 +130,16 @@
 
     <a class="docs" href="/docs" target="_blank" rel="noopener">📖 איך מוסיפים לאתר תגובות, שיאים, לייקים וטפסים</a>
 
+    <div id="adminSettings" class="card settings hidden">
+      <div class="big" style="font-size:17px">⚙️ עריכה עם AI <span class="small" id="aiState"></span></div>
+      <div class="small">מפתח API של Anthropic. נשמר בשרת בלבד ואף אחד לא יכול לראות אותו, גם לא אתה אחרי השמירה. מקבלים אותו ב-console.anthropic.com ← API Keys.</div>
+      <div class="row" style="margin-top:10px">
+        <input id="aiKey" class="field" type="password" placeholder="sk-ant-..." autocomplete="off" style="flex:1;min-width:180px">
+        <button class="btn sm" id="aiSave">שמירה</button>
+      </div>
+      <div class="status" id="aiMsg"></div>
+    </div>
+
     <div class="result" id="result">
       <div class="t">✅ האתר באוויר!</div>
       <a class="link" id="rlink" target="_blank" rel="noopener"></a>
@@ -165,11 +181,12 @@ async function copy(text, btn){
 /* ---------- start ---------- */
 $("pre").textContent = "/s/";
 const CLIENT_ID = "__CLIENT_ID__";
-let ME = null, gReady = false;
+let ME = null, gReady = false, AI_ON = false;
 (async () => {
   let s = {ready:false};
   try { s = await (await fetch("/api/status", {credentials:"same-origin"})).json(); } catch(e) {}
   if (!s.ready) { $("setup").classList.remove("hidden"); return; }
+  AI_ON = !!s.ai;
   if (s.me) showMain(s.me); else showLogin();
 })();
 
@@ -195,12 +212,14 @@ function showMain(me){
   $("meName").textContent = me.name || me.email;
   $("meAdmin").classList.toggle("hidden", !me.admin);
   $("listTitle").textContent = me.admin ? "כל האתרים" : "האתרים שלי";
+  $("adminSettings").classList.toggle("hidden", !me.admin);
+  if (me.admin) loadSettings();
   loadList();
 }
 async function onGoogle(resp){
   $("loginErr").textContent = "";
   const r = await api("/api/login",{method:"POST", headers:{"content-type":"application/json"}, body: JSON.stringify({credential: resp.credential})});
-  if (r.ok) showMain(r.data.me);
+  if (r.ok) { try { AI_ON = !!(await (await fetch("/api/status",{credentials:"same-origin"})).json()).ai; } catch(e){} showMain(r.data.me); }
   else $("loginErr").textContent = r.data.error || "ההתחברות נכשלה";
 }
 
@@ -318,6 +337,91 @@ $("go").onclick = () => {
   xhr.send(fd);
 };
 
+/* ---------- admin settings ---------- */
+async function loadSettings(){
+  const r = await api("/api/settings");
+  if (!r.ok) return;
+  AI_ON = r.data.aiConfigured;
+  $("aiState").textContent = r.data.aiConfigured ? "· פעיל ✅ (" + r.data.hint + ")" : "· כבוי";
+}
+$("aiSave").onclick = async () => {
+  const k = $("aiKey").value.trim();
+  $("aiMsg").textContent = ""; $("aiMsg").className = "status";
+  const r = await api("/api/settings", {method:"POST", headers:{"content-type":"application/json"}, body: JSON.stringify({anthropicKey: k})});
+  $("aiKey").value = "";
+  if (r.ok) { $("aiMsg").textContent = k ? "נשמר ✅ עריכה עם AI פעילה" : "המפתח נמחק"; loadSettings(); }
+  else { $("aiMsg").textContent = r.data.error || "שגיאה"; $("aiMsg").className = "status err"; }
+};
+
+/* ---------- AI editor panel ---------- */
+const AI_IDEAS = ["תוסיף טופס יצירת קשר", "תעשה עיצוב כהה ומודרני", "תוסיף קיר תגובות", "תוסיף כפתור לייק", "תתקן את התצוגה בטלפון", "תוסיף כפתור וואטסאפ"];
+async function toggleAi(card, slug, siteUrl){
+  const old = card.querySelector(".aip");
+  if (old) { old.remove(); return; }
+  const P = document.createElement("div"); P.className = "datap aip";
+  card.appendChild(P);
+  if (!AI_ON) { P.textContent = ME && ME.admin ? "כדי להפעיל עריכה עם AI, הכניסו מפתח API בתיבת ההגדרות למעלה ⚙️" : "עריכה עם AI עוד לא הופעלה באתר הזה."; return; }
+  P.textContent = "טוען…";
+  const fr = await api("/api/sites/" + slug + "/files");
+  P.textContent = "";
+  const files = (fr.data && fr.data.files) || [];
+  if (!files.length) { P.textContent = "אין קבצים שאפשר לערוך"; return; }
+  let undo = (fr.data && fr.data.undo) || {};
+
+  const sel = document.createElement("select");
+  for (const f of files) { const o = document.createElement("option"); o.value = f; o.textContent = "📄 " + f; sel.appendChild(o); }
+  if (files.length > 1) P.appendChild(sel);
+
+  const ta = document.createElement("textarea");
+  ta.placeholder = "מה לשנות? למשל: תוסיף בראש הדף כותרת גדולה \"ברוכים הבאים\" ותשנה את הרקע לכחול כהה";
+  ta.maxLength = 2000;
+  P.appendChild(ta);
+
+  const chips = document.createElement("div"); chips.className = "chips";
+  for (const idea of AI_IDEAS) { const c = document.createElement("span"); c.className = "chip"; c.textContent = idea; c.onclick = () => { ta.value = idea; ta.focus(); }; chips.appendChild(c); }
+  P.appendChild(chips);
+
+  const go = document.createElement("button"); go.className = "btn full"; go.textContent = "בצע ✨";
+  const st = document.createElement("div"); st.className = "status";
+  const out = document.createElement("div");
+  const und = document.createElement("button"); und.className = "btn sm ghost"; und.textContent = "↩️ בטל שינוי אחרון"; und.style.marginTop = "10px";
+  const syncUndo = () => { und.classList.toggle("hidden", !undo[sel.value || files[0]]); };
+  sel.onchange = syncUndo; syncUndo();
+  P.appendChild(go); P.appendChild(st); P.appendChild(out); P.appendChild(und);
+
+  go.onclick = async () => {
+    const prompt = ta.value.trim();
+    if (!prompt) { ta.focus(); return; }
+    go.disabled = true; out.textContent = ""; st.className = "status";
+    const steps = ["קורא את האתר…", "חושב על השינוי…", "כותב קוד…", "כמעט מוכן…"];
+    let i = 0; st.textContent = steps[0];
+    const tick = setInterval(() => { i = Math.min(i + 1, steps.length - 1); st.textContent = steps[i]; }, 6000);
+    const file = sel.value || files[0];
+    const r = await api("/api/sites/" + slug + "/ai", {method:"POST", headers:{"content-type":"application/json"}, body: JSON.stringify({file, prompt})});
+    clearInterval(tick); go.disabled = false; st.textContent = "";
+    if (!r.ok) { st.textContent = r.data.error || "משהו השתבש"; st.className = "status err"; return; }
+    const d = r.data;
+    const box = document.createElement("div"); box.className = "sum";
+    const t = document.createElement("div"); t.textContent = (d.ok ? "✅ " : "ℹ️ ") + (d.summary || "");
+    box.appendChild(t);
+    if (d.ok) {
+      const a = document.createElement("a"); a.href = siteUrl; a.target = "_blank"; a.rel = "noopener"; a.textContent = "פתחו את האתר לראות ←"; a.style.color = "var(--accent)";
+      box.appendChild(document.createElement("br")); box.appendChild(a);
+      ta.value = ""; undo[file] = true; syncUndo();
+    }
+    const left = document.createElement("div"); left.className = "small"; left.textContent = "נשארו היום " + d.left + " עריכות";
+    box.appendChild(left);
+    out.appendChild(box);
+  };
+  und.onclick = () => confirmBtn(und, "לבטל את השינוי האחרון?", async () => {
+    const file = sel.value || files[0];
+    const r = await api("/api/sites/" + slug + "/undo", {method:"POST", headers:{"content-type":"application/json"}, body: JSON.stringify({file})});
+    und.disabled = false;
+    if (r.ok) { undo[file] = false; syncUndo(); out.textContent = "↩️ השינוי בוטל"; }
+    else { st.textContent = r.data.error || "שגיאה"; st.className = "status err"; }
+  });
+}
+
 /* ---------- site data panel ---------- */
 const fmtTime = t => new Date(t).toLocaleString("he-IL",{day:"numeric",month:"numeric",hour:"2-digit",minute:"2-digit"});
 function row(left, btnText, onClick, cls){
@@ -399,13 +503,14 @@ async function loadList(){
     const el = document.createElement("div"); el.className = "site";
     el.innerHTML = '<div class="info"><div class="name"></div><div class="meta"></div></div>'
       + '<a class="btn sm" target="_blank" rel="noopener" style="text-decoration:none">פתיחה</a>'
-      + '<button class="btn sm ghost">קישור</button><button class="btn sm ghost">נתונים</button><button class="btn sm ghost">עדכון</button><button class="btn sm ghost danger">מחיקה</button>'
+      + '<button class="btn sm ghost">קישור</button><button class="btn sm ghost">נתונים</button><button class="btn sm ghost">✨ AI</button><button class="btn sm ghost">עדכון</button><button class="btn sm ghost danger">מחיקה</button>'
       + (ME && ME.admin && !s.mine ? '<button class="btn sm ghost danger">חסימת המשתמש</button>' : '');
     el.querySelector(".name").textContent = s.name || s.slug;
     el.querySelector(".meta").textContent = "/s/" + s.slug + "/  ·  " + fmtSize(s.size||0) + "  ·  " + fmtDate(s.created);
     if (ME && ME.admin && !s.mine && s.ownerEmail) { const o=document.createElement("div"); o.className="meta owner"; o.textContent = "הועלה ע״י " + s.ownerEmail; el.querySelector(".info").appendChild(o); }
     el.querySelector("a").href = s.url;
-    const [bl, bdata, bu, bd, bb] = el.querySelectorAll("button");
+    const [bl, bdata, bai, bu, bd, bb] = el.querySelectorAll("button");
+    bai.onclick = () => toggleAi(el, s.slug, s.url);
     bdata.onclick = () => toggleData(el, s.slug);
     if (bb) bb.onclick = async () => {
       if (bb.dataset.sure !== "1") { bb.dataset.sure="1"; bb.textContent="לחסום ולמחוק את כל האתרים שלו?"; setTimeout(()=>{bb.dataset.sure="";bb.textContent="חסימת המשתמש";},4000); return; }
