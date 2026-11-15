@@ -5,5 +5,11 @@
   "compatibility_date": "2026-10-01",
   "workers_dev": true,
   // KV storage for sites — created automatically on first deploy
-  "kv_namespaces": [{ "binding": "SITES" }]
+  "kv_namespaces": [{ "binding": "SITES" }],
+  "vars": {
+    // Google OAuth Client ID (public, not a secret)
+    "GOOGLE_CLIENT_ID": "",
+    // SHA-256 of the admin's Gmail address (the address itself is not stored here)
+    "ADMIN_EMAIL_SHA256": "4f400705f8f643d4ab4f89f10967bd55c6d79e260c6a533517546cf26bee23ba"
+  }
 }

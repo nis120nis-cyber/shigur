@@ -3,30 +3,23 @@ import UI_HTML from "./ui.html";
 
 // =====================================================================
 //  שיגור — upload files, get a live website
-//  Security model (see SECURITY.md):
-//   • Login with a password → HttpOnly + Secure + SameSite=Strict cookie
-//     holding an HMAC-signed session. The password is never stored in
-//     the browser, so page scripts cannot read it.
-//   • Brute-force protection: 5 wrong passwords per IP → 15 min lockout.
-//   • Every write needs the session cookie + a custom header + same-origin.
-//   • Hosted sites run sandboxed (CSP sandbox, opaque origin), so a hosted
-//     page can never touch the admin session, cookies or API.
-//   • Strict security headers on the admin page (CSP with nonce, no
-//     framing, HSTS, no indexing).
-//   • Upload checks: size limits, file-count limits, zip-bomb guard,
-//     path-traversal guard.
+//  Login: "Sign in with Google". The Google ID token is verified on the
+//  server (signature against Google's public keys, audience, issuer,
+//  expiry, verified email). No passwords, no client secret.
+//  See SECURITY.md for the full model.
 // =====================================================================
 
 // ---------- settings ----------
 const MAX_TOTAL = 50 * 1024 * 1024;   // 50MB per site (uncompressed)
 const MAX_FILE = 24 * 1024 * 1024;    // KV limit is 25MiB per value
-const MAX_FILES = 500;
-const MIN_KEY_LEN = 12;               // minimum password length
+const MAX_FILES = 500;                // files per site
+const SITES_PER_USER = 10;            // admin is unlimited
+const DAILY_FILES_PER_USER = 300;     // file writes per user per day (protects the free KV quota)
 const SESSION_DAYS = 7;
-const MAX_FAILS = 5;                  // wrong passwords before lockout
-const LOCK_SECONDS = 15 * 60;
 const COOKIE = "__Host-shigur";
 const RESERVED = new Set(["api", "admin", "s", "www", "static", "login"]);
+const GOOGLE_ISS = new Set(["accounts.google.com", "https://accounts.google.com"]);
+const GOOGLE_JWKS = "https://www.googleapis.com/oauth2/v3/certs";
 
 const TYPES = {
   html: "text/html; charset=utf-8", htm: "text/html; charset=utf-8",
@@ -41,13 +34,11 @@ const TYPES = {
 };
 const typeOf = p => TYPES[(p.split(".").pop() || "").toLowerCase()] || "application/octet-stream";
 
-// headers on every API / admin response
 const BASE_SEC = {
   "x-content-type-options": "nosniff",
   "referrer-policy": "strict-origin-when-cross-origin",
   "strict-transport-security": "max-age=31536000; includeSubDomains",
   "x-frame-options": "DENY",
-  "cross-origin-opener-policy": "same-origin",
   "x-robots-tag": "noindex, nofollow",
   "permissions-policy": "camera=(), microphone=(), geolocation=(), payment=()",
 };
@@ -59,60 +50,102 @@ function json(data, status = 200, extra = {}) {
   });
 }
 
-// ---------- crypto helpers ----------
+// ---------- encoding helpers ----------
 const enc = new TextEncoder();
+const dec = new TextDecoder();
 const b64u = buf => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 const fromB64u = s => Uint8Array.from(atob(s.replace(/-/g, "+").replace(/_/g, "/")), c => c.charCodeAt(0));
+async function sha256hex(s) {
+  const h = await crypto.subtle.digest("SHA-256", enc.encode(s));
+  return [...new Uint8Array(h)].map(b => b.toString(16).padStart(2, "0")).join("");
+}
+const today = () => new Date().toISOString().slice(0, 10);
 
-async function hmacKey(env) {
-  // SESSION_SECRET is optional; otherwise derived from the password.
-  // Changing UPLOAD_KEY therefore logs out every device.
-  const secret = env.SESSION_SECRET || ("shigur-session:" + env.UPLOAD_KEY);
-  return crypto.subtle.importKey("raw", enc.encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign", "verify"]);
+// ---------- Google ID token verification ----------
+let jwksCache = null; // { keys, exp }
+async function googleKeys(env, url) {
+  // local testing only: allows a test key set on localhost
+  if (env.TEST_JWKS && url.hostname === "localhost") return JSON.parse(env.TEST_JWKS).keys;
+  if (jwksCache && jwksCache.exp > Date.now()) return jwksCache.keys;
+  const r = await fetch(GOOGLE_JWKS, { cf: { cacheTtl: 3600 } });
+  if (!r.ok) throw new Error("jwks");
+  const { keys } = await r.json();
+  const m = /max-age=(\d+)/.exec(r.headers.get("cache-control") || "");
+  jwksCache = { keys, exp: Date.now() + Math.min(parseInt(m ? m[1] : "3600", 10), 21600) * 1000 };
+  return keys;
 }
 
-// constant-time password check (compare HMACs so length doesn't leak)
-async function passwordOk(env, given) {
-  if (!env.UPLOAD_KEY || typeof given !== "string") return false;
-  const k = await crypto.subtle.importKey("raw", crypto.getRandomValues(new Uint8Array(32)), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
-  const [a, b] = await Promise.all([
-    crypto.subtle.sign("HMAC", k, enc.encode(given)),
-    crypto.subtle.sign("HMAC", k, enc.encode(env.UPLOAD_KEY)),
-  ]);
-  const x = new Uint8Array(a), y = new Uint8Array(b);
-  let d = 0;
-  for (let i = 0; i < x.length; i++) d |= x[i] ^ y[i];
-  return d === 0;
+async function verifyGoogleToken(env, url, token) {
+  if (typeof token !== "string" || token.length > 4096) return null;
+  const parts = token.split(".");
+  if (parts.length !== 3) return null;
+  let header, payload;
+  try {
+    header = JSON.parse(dec.decode(fromB64u(parts[0])));
+    payload = JSON.parse(dec.decode(fromB64u(parts[1])));
+  } catch { return null; }
+  if (header.alg !== "RS256" || !header.kid) return null;
+
+  const keys = await googleKeys(env, url);
+  const jwk = keys.find(k => k.kid === header.kid);
+  if (!jwk) return null;
+  const key = await crypto.subtle.importKey("jwk", { kty: jwk.kty, n: jwk.n, e: jwk.e, alg: "RS256", ext: true },
+    { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, ["verify"]);
+  const ok = await crypto.subtle.verify("RSASSA-PKCS1-v1_5", key, fromB64u(parts[2]), enc.encode(parts[0] + "." + parts[1]));
+  if (!ok) return null;
+
+  const now = Math.floor(Date.now() / 1000);
+  if (!GOOGLE_ISS.has(payload.iss)) return null;
+  if (payload.aud !== env.GOOGLE_CLIENT_ID) return null;
+  if (typeof payload.exp !== "number" || payload.exp < now - 60) return null;
+  if (typeof payload.iat === "number" && payload.iat > now + 300) return null;
+  if (!payload.sub || !payload.email || payload.email_verified !== true) return null;
+  return { sub: String(payload.sub), email: String(payload.email).toLowerCase(), name: String(payload.name || payload.email).slice(0, 80) };
 }
 
-async function makeSession(env) {
-  const payload = b64u(enc.encode(JSON.stringify({ exp: Date.now() + SESSION_DAYS * 864e5, n: b64u(crypto.getRandomValues(new Uint8Array(12))) })));
-  const sig = b64u(await crypto.subtle.sign("HMAC", await hmacKey(env), enc.encode(payload)));
+// ---------- sessions (HMAC-signed cookie, secret kept in KV) ----------
+let secretCache = null;
+async function sessionKey(env) {
+  if (!secretCache) {
+    let s = await env.SITES.get("sys:secret");
+    if (!s) {
+      s = b64u(crypto.getRandomValues(new Uint8Array(32)));
+      await env.SITES.put("sys:secret", s);
+    }
+    secretCache = s;
+  }
+  return crypto.subtle.importKey("raw", enc.encode(secretCache), { name: "HMAC", hash: "SHA-256" }, false, ["sign", "verify"]);
+}
+
+async function makeSession(env, user) {
+  const payload = b64u(enc.encode(JSON.stringify({ ...user, exp: Date.now() + SESSION_DAYS * 864e5 })));
+  const sig = b64u(await crypto.subtle.sign("HMAC", await sessionKey(env), enc.encode(payload)));
   return payload + "." + sig;
 }
 
-async function sessionOk(env, token) {
-  if (!token || !env.UPLOAD_KEY) return false;
+async function readSession(env, token) {
+  if (!token) return null;
   const [payload, sig] = token.split(".");
-  if (!payload || !sig) return false;
+  if (!payload || !sig) return null;
   try {
-    const valid = await crypto.subtle.verify("HMAC", await hmacKey(env), fromB64u(sig), enc.encode(payload));
-    if (!valid) return false;
-    const { exp } = JSON.parse(new TextDecoder().decode(fromB64u(payload)));
-    return typeof exp === "number" && exp > Date.now();
-  } catch { return false; }
+    const ok = await crypto.subtle.verify("HMAC", await sessionKey(env), fromB64u(sig), enc.encode(payload));
+    if (!ok) return null;
+    const s = JSON.parse(dec.decode(fromB64u(payload)));
+    if (typeof s.exp !== "number" || s.exp < Date.now() || !s.sub) return null;
+    return s;
+  } catch { return null; }
 }
 
 function getCookie(req, name) {
-  const c = req.headers.get("cookie") || "";
-  for (const part of c.split(/;\s*/)) {
+  for (const part of (req.headers.get("cookie") || "").split(/;\s*/)) {
     const i = part.indexOf("=");
     if (i > 0 && part.slice(0, i) === name) return part.slice(i + 1);
   }
   return null;
 }
+const sessionCookie = (v, maxAge) => `${COOKIE}=${v}; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age=${maxAge}`;
 
-// same-origin + custom header = no CSRF, and blocks sandboxed hosted pages (Origin: null)
+// same-origin + custom header = no CSRF; also blocks sandboxed hosted pages (Origin: null)
 function sameOrigin(req, url) {
   if (req.headers.get("x-shigur") !== "1") return false;
   const o = req.headers.get("origin");
@@ -122,20 +155,17 @@ function sameOrigin(req, url) {
   return true;
 }
 
-async function authed(req, env, url) {
-  return sameOrigin(req, url) && (await sessionOk(env, getCookie(req, COOKIE)));
+async function isAdmin(env, email) {
+  return !!env.ADMIN_EMAIL_SHA256 && (await sha256hex(email)) === env.ADMIN_EMAIL_SHA256;
 }
 
-// ---------- brute-force protection ----------
-const ipOf = req => req.headers.get("cf-connecting-ip") || "local";
-async function lockedOut(env, ip) {
-  const n = parseInt((await env.SITES.get("rl:" + ip)) || "0", 10);
-  return n >= MAX_FAILS;
-}
-async function recordFail(env, ip) {
-  const n = parseInt((await env.SITES.get("rl:" + ip)) || "0", 10) + 1;
-  await env.SITES.put("rl:" + ip, String(n), { expirationTtl: LOCK_SECONDS });
-  return n;
+async function currentUser(req, env, url) {
+  if (!sameOrigin(req, url)) return null;
+  const s = await readSession(env, getCookie(req, COOKIE));
+  if (!s) return null;
+  if (await env.SITES.get("ban:" + s.sub)) return null;
+  s.admin = await isAdmin(env, s.email);
+  return s;
 }
 
 // ---------- slugs & paths ----------
@@ -145,10 +175,8 @@ function cleanSlug(s) {
 }
 function randomSlug() {
   const a = "abcdefghijkmnpqrstuvwxyz23456789";
-  const r = crypto.getRandomValues(new Uint8Array(6));
-  return Array.from(r, b => a[b % a.length]).join("");
+  return Array.from(crypto.getRandomValues(new Uint8Array(6)), b => a[b % a.length]).join("");
 }
-
 function cleanPath(p) {
   p = String(p).replace(/\\/g, "/").replace(/^\/+/, "");
   if (/[\x00-\x1f]/.test(p)) return null;
@@ -162,8 +190,6 @@ function cleanPath(p) {
   if (!out || out.length > 300 || out.startsWith("__MACOSX/") || /(^|\/)\.DS_Store$/.test(out) || /(^|\/)Thumbs\.db$/i.test(out)) return null;
   return out;
 }
-
-// strip a single shared top folder ("my-site/index.html" -> "index.html")
 function normalize(files) {
   let paths = Object.keys(files);
   if (!paths.length) return files;
@@ -181,8 +207,17 @@ function normalize(files) {
   return files;
 }
 
+// ---------- per-user index ----------
+async function userSites(env, sub) {
+  return (await env.SITES.get("u:" + sub, "json")) || [];
+}
+async function setUserSites(env, sub, list) {
+  if (list.length) await env.SITES.put("u:" + sub, JSON.stringify(list));
+  else await env.SITES.delete("u:" + sub);
+}
+
 // ---------- upload ----------
-async function handleUpload(req, env, url) {
+async function handleUpload(req, env, url, user) {
   const len = parseInt(req.headers.get("content-length") || "0", 10);
   if (len > MAX_TOTAL + 1024 * 1024) return json({ error: "האתר גדול מ-50MB" }, 413);
 
@@ -193,8 +228,7 @@ async function handleUpload(req, env, url) {
   let slug = cleanSlug(form.get("slug"));
   const replace = form.get("replace") === "1";
 
-  let files = {};
-  let total = 0;
+  let files = {}, total = 0;
   const all = form.getAll("files");
   const relPaths = form.getAll("paths");
   if (all.length > MAX_FILES) return json({ error: `יותר מדי קבצים (מקסימום ${MAX_FILES})` }, 413);
@@ -204,11 +238,8 @@ async function handleUpload(req, env, url) {
     if (typeof entry === "string") continue;
     const buf = new Uint8Array(await entry.arrayBuffer());
     const rel = relPaths[i] || entry.name;
-
     if (/\.zip$/i.test(entry.name) && all.length === 1) {
-      // zip-bomb guard: check declared sizes BEFORE decompressing
-      let declared = 0, count = 0, tooBig = false;
-      let unz;
+      let declared = 0, count = 0, tooBig = false, unz;
       try {
         unz = unzipSync(buf, {
           filter: f => {
@@ -222,13 +253,11 @@ async function handleUpload(req, env, url) {
       if (tooBig) return json({ error: "ה-ZIP גדול מדי אחרי פתיחה (מקסימום 50MB / 500 קבצים)" }, 413);
       for (const [p, data] of Object.entries(unz)) {
         const cp = cleanPath(p);
-        if (!cp) continue;
-        files[cp] = data; total += data.length;
+        if (cp) { files[cp] = data; total += data.length; }
       }
     } else {
       const cp = cleanPath(rel);
-      if (!cp) continue;
-      files[cp] = buf; total += buf.length;
+      if (cp) { files[cp] = buf; total += buf.length; }
     }
     if (total > MAX_TOTAL) return json({ error: "האתר גדול מ-50MB" }, 413);
   }
@@ -240,52 +269,85 @@ async function handleUpload(req, env, url) {
   if (!files["index.html"]) return json({ error: "חסר קובץ index.html באתר" }, 400);
   for (const p of paths) if (files[p].length > MAX_FILE) return json({ error: `הקובץ ${p} גדול מדי` }, 413);
 
+  // daily quota
+  const qKey = `q:${user.sub}:${today()}`;
+  const used = parseInt((await env.SITES.get(qKey)) || "0", 10);
+  if (!user.admin && used + paths.length > DAILY_FILES_PER_USER) {
+    return json({ error: `הגעתם למכסה היומית (${DAILY_FILES_PER_USER} קבצים ביום). נסו שוב מחר.` }, 429);
+  }
+
+  const mine = await userSites(env, user.sub);
+  let existing = null;
   if (slug) {
     if (RESERVED.has(slug)) return json({ error: "השם הזה שמור, בחרו אחר" }, 409);
-    const existing = await env.SITES.get("m:" + slug, "json");
-    if (existing && !replace) return json({ error: "השם תפוס", taken: true }, 409);
-    if (existing && replace) await deleteSite(env, slug, existing);
+    existing = await env.SITES.get("m:" + slug, "json");
+    if (existing) {
+      if (!replace) return json({ error: "השם תפוס", taken: true }, 409);
+      if (existing.owner !== user.sub && !user.admin) return json({ error: "האתר הזה שייך למישהו אחר" }, 403);
+    }
   } else {
     do { slug = randomSlug(); } while (await env.SITES.get("m:" + slug));
   }
+  if (!existing && !user.admin && mine.length >= SITES_PER_USER) {
+    return json({ error: `אפשר עד ${SITES_PER_USER} אתרים לחשבון. מחקו אתר ישן כדי להעלות חדש.` }, 403);
+  }
+
+  const owner = existing ? existing.owner : user.sub;
+  const ownerEmail = existing ? existing.ownerEmail : user.email;
+  if (existing) await deleteFiles(env, slug, existing);
 
   for (const p of paths) {
     await env.SITES.put(`f:${slug}:${p}`, files[p], { metadata: { t: typeOf(p) } });
   }
-  const meta = { slug, name: name || slug, created: Date.now(), files: paths, size: total };
+  await env.SITES.put(qKey, String(used + paths.length), { expirationTtl: 2 * 86400 });
+
+  const meta = { slug, name: name || slug, created: Date.now(), files: paths, size: total, owner, ownerEmail };
   await env.SITES.put("m:" + slug, JSON.stringify(meta), {
-    metadata: { name: meta.name, created: meta.created, size: total, count: paths.length },
+    metadata: { name: meta.name, created: meta.created, size: total, count: paths.length, owner, ownerEmail },
   });
+  if (owner === user.sub && !mine.includes(slug)) { mine.push(slug); await setUserSites(env, user.sub, mine); }
 
   return json({ ok: true, slug, url: `${url.origin}/s/${slug}/` });
 }
 
-async function deleteSite(env, slug, meta) {
-  meta = meta || await env.SITES.get("m:" + slug, "json");
-  if (!meta) return false;
+async function deleteFiles(env, slug, meta) {
   for (const p of meta.files || []) await env.SITES.delete(`f:${slug}:${p}`);
-  await env.SITES.delete("m:" + slug);
-  return true;
 }
 
-async function listSites(env, origin) {
+async function deleteSite(env, slug, user) {
+  const meta = await env.SITES.get("m:" + slug, "json");
+  if (!meta) return { ok: false, status: 404 };
+  if (user && meta.owner !== user.sub && !user.admin) return { ok: false, status: 403 };
+  await deleteFiles(env, slug, meta);
+  await env.SITES.delete("m:" + slug);
+  const list = await userSites(env, meta.owner);
+  await setUserSites(env, meta.owner, list.filter(s => s !== slug));
+  return { ok: true };
+}
+
+async function listSites(env, origin, user) {
   const out = [];
-  let cursor;
-  do {
-    const r = await env.SITES.list({ prefix: "m:", cursor });
-    for (const k of r.keys) {
-      const slug = k.name.slice(2);
-      out.push({ slug, url: `${origin}/s/${slug}/`, ...(k.metadata || {}) });
+  if (user.admin) {
+    let cursor;
+    do {
+      const r = await env.SITES.list({ prefix: "m:", cursor });
+      for (const k of r.keys) {
+        const md = k.metadata || {};
+        out.push({ slug: k.name.slice(2), url: `${origin}/s/${k.name.slice(2)}/`, ...md, mine: md.owner === user.sub });
+      }
+      cursor = r.list_complete ? null : r.cursor;
+    } while (cursor);
+  } else {
+    for (const slug of await userSites(env, user.sub)) {
+      const m = await env.SITES.get("m:" + slug, "json");
+      if (m) out.push({ slug, url: `${origin}/s/${slug}/`, name: m.name, created: m.created, size: m.size, count: m.files.length, mine: true });
     }
-    cursor = r.list_complete ? null : r.cursor;
-  } while (cursor);
+  }
   out.sort((a, b) => (b.created || 0) - (a.created || 0));
   return out;
 }
 
 // ---------- serving hosted sites ----------
-// Hosted pages run in a sandbox with an opaque origin: their scripts work,
-// but they cannot read this domain's cookies/storage or call the admin API.
 const SITE_SEC = {
   "content-security-policy": "sandbox allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-modals allow-downloads allow-pointer-lock allow-presentation allow-orientation-lock",
   "x-content-type-options": "nosniff",
@@ -296,16 +358,11 @@ const SITE_SEC = {
 async function serveSite(req, env, slug, rest) {
   let path;
   try { path = decodeURIComponent(rest || ""); } catch { path = rest || ""; }
-  const tryKeys = [];
-  if (!path || path.endsWith("/")) tryKeys.push(path + "index.html");
-  else tryKeys.push(path, path + ".html", path + "/index.html");
-
+  const tryKeys = (!path || path.endsWith("/")) ? [path + "index.html"] : [path, path + ".html", path + "/index.html"];
   for (const p of tryKeys) {
     const { value, metadata } = await env.SITES.getWithMetadata(`f:${slug}:${p}`, "arrayBuffer");
     if (value) {
-      if (p === path + "/index.html") {
-        return Response.redirect(new URL(req.url).href.replace(/\/?(\?.*)?$/, "/$1"), 301);
-      }
+      if (p === path + "/index.html") return Response.redirect(new URL(req.url).href.replace(/\/?(\?.*)?$/, "/$1"), 301);
       return new Response(req.method === "HEAD" ? null : value, {
         headers: {
           "content-type": (metadata && metadata.t) || typeOf(p),
@@ -318,30 +375,28 @@ async function serveSite(req, env, slug, rest) {
   const nf = await env.SITES.get(`f:${slug}:404.html`, "arrayBuffer");
   if (nf) return new Response(nf, { status: 404, headers: { "content-type": "text/html; charset=utf-8", ...SITE_SEC } });
   const exists = await env.SITES.get("m:" + slug);
-  return new Response(exists ? "הדף לא נמצא" : "האתר לא קיים", {
-    status: 404, headers: { "content-type": "text/plain; charset=utf-8", ...SITE_SEC },
-  });
+  return new Response(exists ? "הדף לא נמצא" : "האתר לא קיים", { status: 404, headers: { "content-type": "text/plain; charset=utf-8", ...SITE_SEC } });
 }
 
 // ---------- admin page ----------
-function adminPage() {
+function adminPage(env) {
   const nonce = b64u(crypto.getRandomValues(new Uint8Array(16)));
-  const html = UI_HTML.replace("<script>", `<script nonce="${nonce}">`);
+  const html = UI_HTML
+    .replaceAll("<script>", `<script nonce="${nonce}">`)
+    .replace("__CLIENT_ID__", String(env.GOOGLE_CLIENT_ID || "").replace(/[^A-Za-z0-9.\-_]/g, ""));
+  const g = "https://accounts.google.com/gsi/";
   return new Response(html, {
     headers: {
       "content-type": "text/html; charset=utf-8",
       "cache-control": "no-store",
       "content-security-policy":
-        `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'unsafe-inline' https://fonts.googleapis.com; ` +
-        `font-src https://fonts.gstatic.com; img-src data:; connect-src 'self'; form-action 'none'; ` +
-        `frame-ancestors 'none'; base-uri 'none'`,
+        `default-src 'none'; script-src 'nonce-${nonce}' ${g}client; style-src 'unsafe-inline' https://fonts.googleapis.com ${g}style; ` +
+        `font-src https://fonts.gstatic.com; img-src data: https://*.googleusercontent.com; connect-src 'self' ${g}; ` +
+        `frame-src ${g}; form-action 'none'; frame-ancestors 'none'; base-uri 'none'`,
+      "cross-origin-opener-policy": "same-origin-allow-popups",
       ...BASE_SEC,
     },
   });
-}
-
-function sessionCookie(value, maxAge) {
-  return `${COOKIE}=${value}; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age=${maxAge}`;
 }
 
 // ---------- router ----------
@@ -349,55 +404,73 @@ export default {
   async fetch(req, env) {
     const url = new URL(req.url);
     const p = url.pathname;
-    const ready = !!env.UPLOAD_KEY && env.UPLOAD_KEY.length >= MIN_KEY_LEN;
+    const ready = !!env.GOOGLE_CLIENT_ID;
 
-    // hosted sites (public)
     const m = p.match(/^\/s\/([a-z0-9-]+)(\/.*)?$/);
     if (m && (req.method === "GET" || req.method === "HEAD")) {
       if (!m[2]) return Response.redirect(`${url.origin}/s/${m[1]}/${url.search}`, 301);
       return serveSite(req, env, m[1], m[2].slice(1));
     }
 
-    if (p === "/" && req.method === "GET") return adminPage();
+    if (p === "/" && req.method === "GET") return adminPage(env);
     if (p === "/robots.txt") return new Response("User-agent: *\nDisallow: /\nAllow: /s/\n", { headers: { "content-type": "text/plain" } });
 
     if (p.startsWith("/api/")) {
       if (p === "/api/status" && req.method === "GET") {
-        return json({ ready, loggedIn: ready && (await sessionOk(env, getCookie(req, COOKIE))) });
+        let me = null;
+        if (ready) {
+          const s = await readSession(env, getCookie(req, COOKIE));
+          if (s && !(await env.SITES.get("ban:" + s.sub))) me = { name: s.name, email: s.email, admin: await isAdmin(env, s.email) };
+        }
+        return json({ ready, me });
       }
       if (!ready) return json({ error: "האתר לא מוגדר" }, 503);
 
       if (p === "/api/login" && req.method === "POST") {
         if (!sameOrigin(req, url)) return json({ error: "בקשה נדחתה" }, 403);
-        const ip = ipOf(req);
-        if (await lockedOut(env, ip)) return json({ error: "יותר מדי ניסיונות. נסו שוב בעוד 15 דקות." }, 429);
         let body = {};
         try { body = await req.json(); } catch {}
-        if (!(await passwordOk(env, body.password))) {
-          const n = await recordFail(env, ip);
-          const left = Math.max(0, MAX_FAILS - n);
-          return json({ error: left ? `סיסמה שגויה (נשארו ${left} ניסיונות)` : "יותר מדי ניסיונות. נסו שוב בעוד 15 דקות." }, left ? 401 : 429);
-        }
-        await env.SITES.delete("rl:" + ip);
-        return json({ ok: true }, 200, { "set-cookie": sessionCookie(await makeSession(env), SESSION_DAYS * 86400) });
+        let user;
+        try { user = await verifyGoogleToken(env, url, body.credential); } catch { return json({ error: "לא הצלחנו לאמת מול גוגל, נסו שוב" }, 502); }
+        if (!user) return json({ error: "ההתחברות נכשלה" }, 401);
+        if (await env.SITES.get("ban:" + user.sub)) return json({ error: "החשבון הזה נחסם" }, 403);
+        const admin = await isAdmin(env, user.email);
+        return json({ ok: true, me: { name: user.name, email: user.email, admin } }, 200,
+          { "set-cookie": sessionCookie(await makeSession(env, user), SESSION_DAYS * 86400) });
       }
 
-      if (p === "/api/logout" && req.method === "POST") {
-        return json({ ok: true }, 200, { "set-cookie": sessionCookie("", 0) });
-      }
+      if (p === "/api/logout" && req.method === "POST") return json({ ok: true }, 200, { "set-cookie": sessionCookie("", 0) });
 
-      // everything below requires a valid session
-      if (!(await authed(req, env, url))) return json({ error: "צריך להתחבר מחדש" }, 401);
+      const user = await currentUser(req, env, url);
+      if (!user) return json({ error: "צריך להתחבר" }, 401);
 
-      if (p === "/api/upload" && req.method === "POST") return handleUpload(req, env, url);
-      if (p === "/api/sites" && req.method === "GET") return json({ sites: await listSites(env, url.origin) });
+      if (p === "/api/upload" && req.method === "POST") return handleUpload(req, env, url, user);
+      if (p === "/api/sites" && req.method === "GET") return json({ sites: await listSites(env, url.origin, user), admin: user.admin });
+
       const del = p.match(/^\/api\/sites\/([a-z0-9-]+)$/);
-      if (del && req.method === "DELETE") return json({ ok: await deleteSite(env, del[1]) });
+      if (del && req.method === "DELETE") {
+        const r = await deleteSite(env, del[1], user);
+        return json(r.ok ? { ok: true } : { error: r.status === 403 ? "זה לא האתר שלך" : "לא נמצא" }, r.ok ? 200 : r.status);
+      }
+
       if (p === "/api/slug" && req.method === "GET") {
         const s = cleanSlug(url.searchParams.get("s"));
         if (!s) return json({ slug: "", free: false });
         return json({ slug: s, free: !RESERVED.has(s) && !(await env.SITES.get("m:" + s)) });
       }
+
+      // admin: block a user and delete all their sites
+      if (p === "/api/ban" && req.method === "POST") {
+        if (!user.admin) return json({ error: "אין הרשאה" }, 403);
+        let body = {};
+        try { body = await req.json(); } catch {}
+        const sub = String(body.owner || "");
+        if (!sub || sub === user.sub) return json({ error: "בקשה לא תקינה" }, 400);
+        await env.SITES.put("ban:" + sub, "1");
+        for (const slug of await userSites(env, sub)) await deleteSite(env, slug, null);
+        return json({ ok: true });
+      }
+
       return json({ error: "לא נמצא" }, 404);
     }
 

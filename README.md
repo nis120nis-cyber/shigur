@@ -6,27 +6,17 @@
 - בוחרים כתובת, למשל `/s/my-site/`
 - כל אחד יכול לפתוח את הקישור, גם בלי חשבון
 - אפשר לעדכן אתר קיים (אותה כתובת) או למחוק אותו
-- רק מי שיודע את הסיסמה יכול להעלות
-- מאובטח: נעילה אחרי 5 ניסיונות שגויים, עוגיות מוצפנות, הגנת CSRF, ובידוד מלא של האתרים המתארחים. פירוט ב-[SECURITY.md](SECURITY.md)
+- מתחברים עם גוגל. כל אחד מנהל רק את האתרים שלו, ועד 10 אתרים לחשבון
+- המנהל רואה את כל האתרים ויכול לחסום משתמשים
+- מאובטח: אימות גוגל בצד השרת, עוגיות חתומות, הגנת CSRF, ובידוד מלא של האתרים המתארחים. פירוט ב-[SECURITY.md](SECURITY.md)
 
 רץ על Cloudflare Workers + KV, בחינם.
 
-## העלאה לאוויר (פעם אחת, בערך 5 דקות)
+## העלאה לאוויר
 
-1. נכנסים ל-[dash.cloudflare.com](https://dash.cloudflare.com) ונרשמים בחינם.
-2. **Workers & Pages** ← **Create** ← **Import a repository** ← מחברים את GitHub ובוחרים את הריפו `shigur` ← **Deploy**.
-   מקום האחסון (KV) נוצר אוטומטית.
-3. בתוך ה-Worker: **Settings** ← **Variables and Secrets** ← **Add**:
-   - Type: **Secret**
-   - Name: `UPLOAD_KEY`
-   - Value: סיסמה חזקה, **לפחות 12 תווים** (מומלץ 16+)
-   ← **Deploy**
-4. פותחים את הכתובת `https://shigur.<השם-שלכם>.workers.dev`, נכנסים עם הסיסמה ומשגרים.
-
-מעכשיו כל `git push` לריפו מעדכן את האתר אוטומטית.
-
-### דומיין משלכם (לא חובה)
-ב-Worker: **Settings** ← **Domains & Routes** ← **Add** ← **Custom domain**.
+1. ב-Cloudflare: **Workers & Pages** ← **Create** ← **Import a repository** ← `shigur` ← **Deploy**.
+2. ב-[Google Cloud Console](https://console.cloud.google.com) יוצרים **OAuth Client ID** מסוג Web application, ומוסיפים ב-**Authorized JavaScript origins** את כתובת האתר (`https://shigur.<השם-שלכם>.workers.dev`).
+3. מדביקים את ה-Client ID ב-`GOOGLE_CLIENT_ID` בקובץ `wrangler.jsonc` ודוחפים ל-GitHub. האתר מתעדכן לבד.
 
 ## מגבלות
 - אתרים מתארחים רצים בארגז חול, ולכן localStorage ו-cookies לא זמינים בהם
@@ -36,6 +26,5 @@
 ## פיתוח מקומי
 ```
 npm install
-echo 'UPLOAD_KEY="local-test-password"' > .dev.vars
 npm run dev
 ```

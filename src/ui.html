@@ -7,6 +7,7 @@
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🚀</text></svg>">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Rubik:wght@400;500;700;900&display=swap" rel="stylesheet">
+<script src="https://accounts.google.com/gsi/client" async></script>
 <style>
   :root{--bg:#0d0f14;--panel:#161a22;--panel2:#1c212b;--line:#262c38;--text:#eef1f6;--muted:#8c95a6;--accent:#7cff6b;--ink:#0b1a08;--danger:#ff6b6b;--warn:#ffd36b}
   *{box-sizing:border-box}
@@ -62,6 +63,11 @@
   .warn{background:#2a2410;border:1px solid #5a4a1a;color:var(--warn);border-radius:14px;padding:16px;line-height:1.6}
   .out{font-size:14px;color:var(--muted);text-decoration:underline;background:none;border:0;padding:0}
   .hidden{display:none!important}
+  .who{display:flex;align-items:center;gap:10px;justify-content:space-between;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:10px 14px;margin-bottom:16px;font-size:14px;color:var(--muted)}
+  .who b{color:var(--text)}
+  .badge{background:var(--accent);color:var(--ink);border-radius:99px;padding:2px 8px;font-size:12px;font-weight:700;margin-inline-start:6px}
+  #gbtn{display:flex;justify-content:center;margin-top:18px;min-height:44px}
+  .owner{color:var(--warn)}
 </style>
 </head>
 <body>
@@ -70,22 +76,20 @@
   <p class="sub">מעלים קבצים — מקבלים אתר אמיתי עם קישור שכל אחד יכול לפתוח.</p>
 
   <div id="setup" class="warn hidden">
-    האתר עדיין לא מוגדר: צריך להוסיף סיסמת העלאה בשם <b>UPLOAD_KEY</b> (לפחות 12 תווים) בהגדרות ה-Worker ב-Cloudflare
-    (Settings ← Variables and Secrets, מסוג Secret). אחרי זה רעננו את הדף.
+    האתר עדיין לא מחובר להתחברות עם גוגל: חסר <b>GOOGLE_CLIENT_ID</b> בהגדרות. ברגע שהוא יוגדר, הדף יעבוד.
   </div>
 
   <!-- login -->
   <div id="loginView" class="card login hidden">
-    <div class="big" style="margin-bottom:4px">כניסה</div>
-    <div class="small">רק מי שיש לו את הסיסמה יכול להעלות אתרים.</div>
-    <label for="pw">סיסמה</label>
-    <input id="pw" class="field" type="password" autocomplete="current-password">
+    <div class="big" style="margin-bottom:4px">התחברות</div>
+    <div class="small">מתחברים עם חשבון גוגל כדי להעלות ולנהל אתרים. לצפייה באתרים לא צריך להתחבר.</div>
+    <div id="gbtn"></div>
     <div class="status err" id="loginErr"></div>
-    <button class="btn full" id="loginBtn" style="margin-top:6px">כניסה</button>
   </div>
 
   <!-- main -->
   <div id="mainView" class="hidden">
+    <div class="who"><span>מחובר/ת כ-<b id="meName"></b><span id="meAdmin" class="badge hidden">מנהל</span></span><button class="out" id="logout">יציאה</button></div>
     <div class="card">
       <div class="drop" id="drop">
         <div class="icon">↑</div>
@@ -121,7 +125,7 @@
       </div>
     </div>
 
-    <h2>האתרים שלי <button class="out" id="logout">יציאה</button></h2>
+    <h2 id="listTitle">האתרים שלי</h2>
     <div class="list" id="list"><div class="empty">טוען…</div></div>
   </div>
 </div>
@@ -151,28 +155,47 @@ async function copy(text, btn){
 
 /* ---------- start ---------- */
 $("pre").textContent = ORIGIN.replace(/^https?:\/\//,"") + "/s/";
+const CLIENT_ID = "__CLIENT_ID__";
+let ME = null, gReady = false;
 (async () => {
   let s = {ready:false};
   try { s = await (await fetch("/api/status", {credentials:"same-origin"})).json(); } catch(e) {}
   if (!s.ready) { $("setup").classList.remove("hidden"); return; }
-  if (s.loggedIn) showMain(); else showLogin();
+  if (s.me) showMain(s.me); else showLogin();
 })();
 
-function showLogin(){ $("loginView").classList.remove("hidden"); $("mainView").classList.add("hidden"); $("pw").focus(); }
-function showMain(){ $("loginView").classList.add("hidden"); $("mainView").classList.remove("hidden"); loadList(); }
-
-async function doLogin(){
-  const pw = $("pw").value;
-  if (!pw) return;
-  $("loginErr").textContent = ""; $("loginBtn").disabled = true;
-  const r = await api("/api/login",{method:"POST", headers:{"content-type":"application/json"}, body: JSON.stringify({password: pw})});
-  $("loginBtn").disabled = false; $("pw").value = "";
-  if (r.ok) showMain();
-  else $("loginErr").textContent = r.data.error || "הכניסה נכשלה";
+function initGoogle(){
+  if (gReady) return true;
+  if (!window.google || !google.accounts || !google.accounts.id) return false;
+  google.accounts.id.initialize({ client_id: CLIENT_ID, callback: onGoogle, ux_mode: "popup", auto_select: false, cancel_on_tap_outside: true });
+  gReady = true; return true;
 }
-$("loginBtn").onclick = doLogin;
-$("pw").addEventListener("keydown", e => { if (e.key === "Enter") doLogin(); });
-$("logout").onclick = async () => { await api("/api/logout",{method:"POST"}); showLogin(); };
+function showLogin(){
+  ME = null;
+  $("loginView").classList.remove("hidden"); $("mainView").classList.add("hidden");
+  const draw = () => {
+    if (!initGoogle()) { setTimeout(draw, 200); return; }
+    $("gbtn").innerHTML = "";
+    google.accounts.id.renderButton($("gbtn"), { theme: "filled_black", size: "large", shape: "pill", text: "signin_with", locale: "he", width: 280 });
+  };
+  draw();
+}
+function showMain(me){
+  ME = me;
+  $("loginView").classList.add("hidden"); $("mainView").classList.remove("hidden");
+  $("meName").textContent = me.name || me.email;
+  $("meAdmin").classList.toggle("hidden", !me.admin);
+  $("listTitle").textContent = me.admin ? "כל האתרים" : "האתרים שלי";
+  loadList();
+}
+async function onGoogle(resp){
+  $("loginErr").textContent = "";
+  const r = await api("/api/login",{method:"POST", headers:{"content-type":"application/json"}, body: JSON.stringify({credential: resp.credential})});
+  if (r.ok) showMain(r.data.me);
+  else $("loginErr").textContent = r.data.error || "ההתחברות נכשלה";
+}
+
+$("logout").onclick = async () => { await api("/api/logout",{method:"POST"}); try { google.accounts.id.disableAutoSelect(); } catch(e){} showLogin(); };
 
 /* ---------- picking files ---------- */
 $("pickFiles").onclick = () => $("fileInput").click();
@@ -293,15 +316,24 @@ async function loadList(){
   if (!r.ok) { L.innerHTML = '<div class="empty">לא ניתן לטעון את הרשימה</div>'; return; }
   const sites = r.data.sites || [];
   if (!sites.length) { L.innerHTML = '<div class="empty">עוד אין אתרים. העלו את הראשון למעלה ☝️</div>'; return; }
+  if (ME && !ME.admin) { const c=document.createElement("div"); c.className="small"; c.style.marginBottom="10px"; c.textContent = sites.length + " מתוך 10 אתרים"; L.appendChild(c); }
   for (const s of sites) {
     const el = document.createElement("div"); el.className = "site";
     el.innerHTML = '<div class="info"><div class="name"></div><div class="meta"></div></div>'
       + '<a class="btn sm" target="_blank" rel="noopener" style="text-decoration:none">פתיחה</a>'
-      + '<button class="btn sm ghost">קישור</button><button class="btn sm ghost">עדכון</button><button class="btn sm ghost danger">מחיקה</button>';
+      + '<button class="btn sm ghost">קישור</button><button class="btn sm ghost">עדכון</button><button class="btn sm ghost danger">מחיקה</button>'
+      + (ME && ME.admin && !s.mine ? '<button class="btn sm ghost danger">חסימת המשתמש</button>' : '');
     el.querySelector(".name").textContent = s.name || s.slug;
     el.querySelector(".meta").textContent = "/s/" + s.slug + "/  ·  " + fmtSize(s.size||0) + "  ·  " + fmtDate(s.created);
+    if (ME && ME.admin && !s.mine && s.ownerEmail) { const o=document.createElement("div"); o.className="meta owner"; o.textContent = "הועלה ע״י " + s.ownerEmail; el.querySelector(".info").appendChild(o); }
     el.querySelector("a").href = s.url;
-    const [bl, bu, bd] = el.querySelectorAll("button");
+    const [bl, bu, bd, bb] = el.querySelectorAll("button");
+    if (bb) bb.onclick = async () => {
+      if (bb.dataset.sure !== "1") { bb.dataset.sure="1"; bb.textContent="לחסום ולמחוק את כל האתרים שלו?"; setTimeout(()=>{bb.dataset.sure="";bb.textContent="חסימת המשתמש";},4000); return; }
+      bb.disabled = true;
+      const r = await api("/api/ban",{method:"POST", headers:{"content-type":"application/json"}, body: JSON.stringify({owner: s.owner})});
+      if (r.ok) loadList(); else { bb.disabled=false; bb.textContent = r.data.error || "נכשל"; }
+    };
     bl.onclick = e => copy(s.url, e.target);
     bu.onclick = () => {
       $("name").value = s.name || s.slug; $("slug").value = s.slug;
@@ -318,7 +350,7 @@ async function loadList(){
       if (bd.dataset.sure !== "1") { bd.dataset.sure="1"; bd.textContent="בטוח?"; setTimeout(()=>{bd.dataset.sure="";bd.textContent="מחיקה";},3000); return; }
       bd.disabled = true; bd.textContent = "מוחק…";
       const r = await api("/api/sites/" + s.slug, {method:"DELETE"});
-      if (r.ok) el.remove(); else { bd.disabled=false; bd.textContent="נכשל"; }
+      if (r.ok) el.remove(); else { bd.disabled=false; bd.textContent = r.data.error || "נכשל"; }
       if (!$("list").children.length) loadList();
     };
     L.appendChild(el);
