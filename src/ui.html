@@ -68,6 +68,12 @@
   .badge{background:var(--accent);color:var(--ink);border-radius:99px;padding:2px 8px;font-size:12px;font-weight:700;margin-inline-start:6px}
   #gbtn{display:flex;justify-content:center;margin-top:18px;min-height:44px}
   .owner{color:var(--warn)}
+  .datap{flex-basis:100%;background:var(--panel2);border:1px solid var(--line);border-radius:12px;padding:12px;margin-top:4px;font-size:14px}
+  .datap .row2{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--line)}
+  .datap .row2:last-child{border-bottom:0}
+  .rec{direction:ltr;text-align:left;font-family:ui-monospace,monospace;font-size:12px;white-space:pre-wrap;word-break:break-word;flex:1;color:var(--text)}
+  .lnk{color:var(--accent);background:none;border:0;padding:0;font-size:14px;text-decoration:underline}
+  .docs{display:block;text-align:center;margin-top:14px;color:var(--accent);font-size:15px}
 </style>
 </head>
 <body>
@@ -115,6 +121,8 @@
       <div class="status" id="status"></div>
       <button class="btn full" id="go" disabled style="margin-top:8px">שגר אתר 🚀</button>
     </div>
+
+    <a class="docs" href="/docs" target="_blank" rel="noopener">📖 איך מוסיפים לאתר תגובות, שיאים, לייקים וטפסים</a>
 
     <div class="result" id="result">
       <div class="t">✅ האתר באוויר!</div>
@@ -310,6 +318,75 @@ $("go").onclick = () => {
   xhr.send(fd);
 };
 
+/* ---------- site data panel ---------- */
+const fmtTime = t => new Date(t).toLocaleString("he-IL",{day:"numeric",month:"numeric",hour:"2-digit",minute:"2-digit"});
+function row(left, btnText, onClick, cls){
+  const r = document.createElement("div"); r.className = "row2";
+  const l = document.createElement("div"); l.className = cls || ""; l.style.flex = "1";
+  if (typeof left === "string") l.textContent = left; else l.appendChild(left);
+  r.appendChild(l);
+  if (btnText) { const b = document.createElement("button"); b.className = "btn sm ghost danger"; b.textContent = btnText; b.onclick = () => onClick(b, r); r.appendChild(b); }
+  return r;
+}
+function confirmBtn(b, label, fn){
+  if (b.dataset.sure !== "1") { const o=b.textContent; b.dataset.sure="1"; b.textContent=label; setTimeout(()=>{b.dataset.sure="";b.textContent=o;},3000); return; }
+  b.disabled = true; fn();
+}
+async function toggleData(card, slug){
+  const old = card.querySelector(".datap");
+  if (old) { old.remove(); return; }
+  const P = document.createElement("div"); P.className = "datap"; P.textContent = "טוען…";
+  card.appendChild(P);
+  const r = await api("/api/sites/" + slug + "/data");
+  P.textContent = "";
+  if (!r.ok) { P.textContent = r.data.error || "שגיאה"; return; }
+  const d = r.data;
+  const head = document.createElement("div"); head.className = "small"; head.style.marginBottom = "6px";
+  head.textContent = d.total + " רשומות מתוך " + d.max.toLocaleString();
+  P.appendChild(head);
+  if (!d.collections.length && !d.counters.length) {
+    const e = document.createElement("div"); e.className = "small";
+    e.innerHTML = 'אין עדיין נתונים. <a href="/docs" target="_blank" rel="noopener" style="color:var(--accent)">איך מתחילים?</a>';
+    P.appendChild(e); return;
+  }
+  for (const c of d.collections) {
+    const label = document.createElement("span");
+    const open = document.createElement("button"); open.className = "lnk"; open.textContent = c.name;
+    label.appendChild(open);
+    label.appendChild(document.createTextNode("  ·  " + c.count + (c.name.startsWith("_") ? " · פרטי 🔒" : "")));
+    const rr = row(label, "מחק אוסף", (b, rw) => confirmBtn(b, "בטוח?", async () => {
+      await api("/api/sites/" + slug + "/data/" + encodeURIComponent(c.name), {method:"DELETE"}); rw.remove();
+    }));
+    open.onclick = () => showRecords(P, slug, c.name);
+    P.appendChild(rr);
+  }
+  for (const n of d.counters) {
+    P.appendChild(row("🔢 " + n.name + ": " + n.value, "אפס", (b, rw) => confirmBtn(b, "בטוח?", async () => {
+      await api("/api/sites/" + slug + "/counters/" + encodeURIComponent(n.name), {method:"DELETE"}); rw.remove();
+    })));
+  }
+}
+async function showRecords(P, slug, coll){
+  P.textContent = "טוען…";
+  const r = await api("/api/sites/" + slug + "/data/" + encodeURIComponent(coll));
+  P.textContent = "";
+  const back = document.createElement("button"); back.className = "lnk"; back.textContent = "← חזרה";
+  back.onclick = () => { const card = P.parentElement; P.remove(); toggleData(card, slug); };
+  P.appendChild(back);
+  const t = document.createElement("div"); t.style.fontWeight = "700"; t.style.margin = "8px 0"; t.textContent = coll;
+  P.appendChild(t);
+  const items = (r.data && r.data.items) || [];
+  if (!items.length) { const e=document.createElement("div"); e.className="small"; e.textContent="ריק"; P.appendChild(e); return; }
+  for (const it of items) {
+    const { id, created, ...rest } = it;
+    const txt = fmtTime(created) + "\n" + JSON.stringify(rest, null, 1);
+    P.appendChild(row(txt, "מחק", (b, rw) => confirmBtn(b, "בטוח?", async () => {
+      await api("/api/sites/" + slug + "/data/" + encodeURIComponent(coll) + "/" + id, {method:"DELETE"}); rw.remove();
+    }), "rec"));
+  }
+  if (items.length === 100) { const e=document.createElement("div"); e.className="small"; e.textContent="מוצגות 100 האחרונות"; P.appendChild(e); }
+}
+
 /* ---------- list ---------- */
 async function loadList(){
   const r = await api("/api/sites");
@@ -322,13 +399,14 @@ async function loadList(){
     const el = document.createElement("div"); el.className = "site";
     el.innerHTML = '<div class="info"><div class="name"></div><div class="meta"></div></div>'
       + '<a class="btn sm" target="_blank" rel="noopener" style="text-decoration:none">פתיחה</a>'
-      + '<button class="btn sm ghost">קישור</button><button class="btn sm ghost">עדכון</button><button class="btn sm ghost danger">מחיקה</button>'
+      + '<button class="btn sm ghost">קישור</button><button class="btn sm ghost">נתונים</button><button class="btn sm ghost">עדכון</button><button class="btn sm ghost danger">מחיקה</button>'
       + (ME && ME.admin && !s.mine ? '<button class="btn sm ghost danger">חסימת המשתמש</button>' : '');
     el.querySelector(".name").textContent = s.name || s.slug;
     el.querySelector(".meta").textContent = "/s/" + s.slug + "/  ·  " + fmtSize(s.size||0) + "  ·  " + fmtDate(s.created);
     if (ME && ME.admin && !s.mine && s.ownerEmail) { const o=document.createElement("div"); o.className="meta owner"; o.textContent = "הועלה ע״י " + s.ownerEmail; el.querySelector(".info").appendChild(o); }
     el.querySelector("a").href = s.url;
-    const [bl, bu, bd, bb] = el.querySelectorAll("button");
+    const [bl, bdata, bu, bd, bb] = el.querySelectorAll("button");
+    bdata.onclick = () => toggleData(el, s.slug);
     if (bb) bb.onclick = async () => {
       if (bb.dataset.sure !== "1") { bb.dataset.sure="1"; bb.textContent="לחסום ולמחוק את כל האתרים שלו?"; setTimeout(()=>{bb.dataset.sure="";bb.textContent="חסימת המשתמש";},4000); return; }
       bb.disabled = true;

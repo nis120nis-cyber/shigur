@@ -1,6 +1,7 @@
 import { unzipSync } from "fflate";
 import UI_HTML from "./ui.html";
-import { PRIVACY, TERMS } from "./legal.js";
+import { PRIVACY, TERMS, DOCS } from "./legal.js";
+import { handlePublicData, ownerSummary, ownerList, ownerDeleteRecord, ownerDeleteCollection, ownerResetCounter, deleteSiteData, NAME_OK, SDK } from "./data.js";
 
 // =====================================================================
 //  שיגור — upload files, get a live website
@@ -321,6 +322,7 @@ async function deleteSite(env, slug, user) {
   if (user && meta.owner !== user.sub && !user.admin) return { ok: false, status: 403 };
   await deleteFiles(env, slug, meta);
   await env.SITES.delete("m:" + slug);
+  await deleteSiteData(env, slug);
   const list = await userSites(env, meta.owner);
   await setUserSites(env, meta.owner, list.filter(s => s !== slug));
   return { ok: true };
@@ -413,11 +415,22 @@ export default {
       return serveSite(req, env, m[1], m[2].slice(1));
     }
 
+    // per-site database: public API for hosted sites + the JS library
+    if (p === "/shigur.js") {
+      return new Response(SDK, { headers: { "content-type": "text/javascript; charset=utf-8", "cache-control": "public, max-age=300", "access-control-allow-origin": "*", "x-content-type-options": "nosniff" } });
+    }
+    const dm = p.match(/^\/api\/data\/([a-z0-9-]+)\/([cn]\/[^/]+)$/);
+    if (dm) return handlePublicData(req, env, dm[1], dm[2]);
+    if (p.startsWith("/api/data/")) return json({ error: "not found" }, 404);
+
     if (p === "/" && req.method === "GET") return adminPage(env);
+    if (p === "/docs") {
+      return new Response(DOCS, { headers: { "content-type": "text/html; charset=utf-8", "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'", ...BASE_SEC } });
+    }
     if (p === "/privacy" || p === "/terms") {
       return new Response(p === "/privacy" ? PRIVACY : TERMS, { headers: { "content-type": "text/html; charset=utf-8", "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'", ...BASE_SEC, "x-robots-tag": "index" } });
     }
-    if (p === "/robots.txt") return new Response("User-agent: *\nDisallow: /\nAllow: /s/\nAllow: /privacy\nAllow: /terms\n", { headers: { "content-type": "text/plain" } });
+    if (p === "/robots.txt") return new Response("User-agent: *\nDisallow: /\nAllow: /s/\nAllow: /privacy\nAllow: /terms\nAllow: /docs\n", { headers: { "content-type": "text/plain" } });
 
     if (p.startsWith("/api/")) {
       if (p === "/api/status" && req.method === "GET") {
@@ -455,6 +468,23 @@ export default {
       if (del && req.method === "DELETE") {
         const r = await deleteSite(env, del[1], user);
         return json(r.ok ? { ok: true } : { error: r.status === 403 ? "זה לא האתר שלך" : "לא נמצא" }, r.ok ? 200 : r.status);
+      }
+
+      // owner: manage a site's data
+      const om = p.match(/^\/api\/sites\/([a-z0-9-]+)\/(data|counters)(?:\/([^/]+))?(?:\/(\d+))?$/);
+      if (om) {
+        const [, slug, what, name, id] = om;
+        const meta = await env.SITES.get("m:" + slug, "json");
+        if (!meta) return json({ error: "לא נמצא" }, 404);
+        if (meta.owner !== user.sub && !user.admin) return json({ error: "זה לא האתר שלך" }, 403);
+        if (!env.DB) return json({ error: "מסד הנתונים לא מוגדר" }, 503);
+        if (name && !NAME_OK(name)) return json({ error: "שם לא תקין" }, 400);
+        if (what === "data" && !name && req.method === "GET") return json(await ownerSummary(env, slug));
+        if (what === "data" && name && !id && req.method === "GET") return json({ items: await ownerList(env, slug, name, url.searchParams.get("before")) });
+        if (what === "data" && name && !id && req.method === "DELETE") { await ownerDeleteCollection(env, slug, name); return json({ ok: true }); }
+        if (what === "data" && name && id && req.method === "DELETE") { await ownerDeleteRecord(env, slug, name, id); return json({ ok: true }); }
+        if (what === "counters" && name && req.method === "DELETE") { await ownerResetCounter(env, slug, name); return json({ ok: true }); }
+        return json({ error: "לא נמצא" }, 404);
       }
 
       if (p === "/api/slug" && req.method === "GET") {

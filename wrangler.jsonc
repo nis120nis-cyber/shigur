@@ -6,6 +6,10 @@
   "workers_dev": true,
   // KV storage for sites — created automatically on first deploy
   "kv_namespaces": [{ "binding": "SITES" }],
+  // per-site database (SQLite) — created automatically on first deploy
+  "d1_databases": [{ "binding": "DB" }],
+  // max 20 writes per minute per visitor per site
+  "ratelimits": [{ "name": "WRITE_LIMIT", "namespace_id": "1001", "simple": { "limit": 20, "period": 60 } }],
   "vars": {
     // Google OAuth Client ID (public, not a secret)
     "GOOGLE_CLIENT_ID": "870718392340-5dqaot95doec3dhoasvnj3qk1db545fd.apps.googleusercontent.com",
