@@ -8,7 +8,7 @@
   "kv_namespaces": [{ "binding": "SITES" }],
   "vars": {
     // Google OAuth Client ID (public, not a secret)
-    "GOOGLE_CLIENT_ID": "",
+    "GOOGLE_CLIENT_ID": "870718392340-5dqaot95doec3dhoasvnj3qk1db545fd.apps.googleusercontent.com",
     // SHA-256 of the admin's Gmail address (the address itself is not stored here)
     "ADMIN_EMAIL_SHA256": "4f400705f8f643d4ab4f89f10967bd55c6d79e260c6a533517546cf26bee23ba"
   }
