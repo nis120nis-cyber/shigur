@@ -36,7 +36,7 @@
   .field:focus{outline:2px solid var(--accent);outline-offset:-1px}
   .slugbox{display:flex;align-items:stretch;direction:ltr;background:var(--panel2);border:1px solid var(--line);border-radius:12px;overflow:hidden}
   .slugbox:focus-within{outline:2px solid var(--accent);outline-offset:-1px}
-  .slugbox .pre{padding:13px 0 13px 14px;color:var(--muted);font-size:14px;white-space:nowrap;display:flex;align-items:center;max-width:55%;overflow:hidden;text-overflow:ellipsis}
+  .slugbox .pre{padding:13px 2px 13px 14px;color:var(--muted);font-size:14px;white-space:nowrap;display:flex;align-items:center;max-width:55%;overflow:hidden;text-overflow:ellipsis}
   .slugbox input{flex:1;min-width:60px;background:transparent;border:0;color:var(--text);padding:13px 14px 13px 2px;font-size:16px;outline:none}
   .hint{font-size:13px;margin-top:6px;min-height:18px;color:var(--muted)}
   .hint.ok{color:var(--accent)} .hint.bad{color:var(--danger)}
@@ -155,7 +155,7 @@ async function copy(text, btn){
 }
 
 /* ---------- start ---------- */
-$("pre").textContent = ORIGIN.replace(/^https?:\/\//,"") + "/s/";
+$("pre").textContent = "/s/";
 const CLIENT_ID = "__CLIENT_ID__";
 let ME = null, gReady = false;
 (async () => {
