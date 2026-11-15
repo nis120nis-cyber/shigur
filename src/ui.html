@@ -76,6 +76,18 @@
   .plan{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:16px}
   .plan .meter{height:8px;background:var(--line);border-radius:99px;overflow:hidden;margin:8px 0}
   .plan .meter i{display:block;height:100%;background:var(--accent)}
+  .chk{display:flex;align-items:flex-start;gap:10px;margin-top:16px;cursor:pointer;font-size:15px;line-height:1.5}
+  .chk input{width:20px;height:20px;accent-color:var(--accent);margin-top:2px;flex-shrink:0}
+  .rep{margin-top:12px;font-size:14px;line-height:1.7}
+  .rep ul{margin:4px 0 0;padding-inline-start:20px}
+  .rep .w{color:var(--warn)}
+  .wa{background:#25D366!important;color:#06280f!important;text-decoration:none}
+  .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;text-align:center;margin-bottom:12px}
+  .stats b{display:block;font-size:22px;color:var(--text)}
+  .stats span{font-size:12px;color:var(--muted)}
+  .bars{display:flex;align-items:flex-end;gap:3px;height:80px;direction:ltr}
+  .bars i{flex:1;background:var(--accent);border-radius:3px 3px 0 0;min-height:2px;opacity:.85}
+  .bars i.z{background:var(--line)}
   .docs{display:block;text-align:center;margin-top:14px;color:var(--accent);font-size:15px}
 </style>
 </head>
@@ -122,6 +134,8 @@
       <div class="slugbox"><span class="pre" id="pre"></span><input id="slug" placeholder="my-site" maxlength="40" autocapitalize="off" autocomplete="off" spellcheck="false"></div>
       <div class="hint" id="slugHint">אותיות באנגלית, מספרים ומקפים. השאירו ריק לכתובת אקראית.</div>
 
+      <label class="chk"><input type="checkbox" id="improve" checked><span><b>✨ שיפור אוטומטי</b> (מומלץ)<br><span class="small">מתקן תצוגה בטלפון, עברית ו-RTL, מוסיף תצוגה מקדימה לוואטסאפ ומאיץ תמונות. לא משנה את העיצוב.</span></span></label>
+
       <div class="bar" id="bar"><i></i></div>
       <div class="status" id="status"></div>
       <button class="btn full" id="go" disabled style="margin-top:8px">שגר אתר 🚀</button>
@@ -132,7 +146,9 @@
     <div class="result" id="result">
       <div class="t">✅ האתר באוויר!</div>
       <a class="link" id="rlink" target="_blank" rel="noopener"></a>
+      <div id="rreport" class="rep"></div>
       <div class="row">
+        <a class="btn sm wa" id="rwa" target="_blank" rel="noopener">שיתוף בוואטסאפ</a>
         <button class="btn sm" id="rcopy">העתקת קישור</button>
         <a class="btn sm ghost" id="ropen" target="_blank" rel="noopener" style="text-decoration:none">פתיחת האתר</a>
       </div>
@@ -291,6 +307,7 @@ $("go").onclick = () => {
   const fd = new FormData();
   fd.append("name", $("name").value.trim());
   fd.append("slug", slug);
+  fd.append("improve", $("improve").checked ? "1" : "0");
   if (replaceSlug && slug === replaceSlug) fd.append("replace", "1");
   for (const x of picked) { fd.append("files", x.file, x.file.name); fd.append("paths", x.path); }
 
@@ -309,6 +326,8 @@ $("go").onclick = () => {
       setStatus("");
       $("rlink").textContent = d.url; $("rlink").href = d.url; $("ropen").href = d.url;
       $("rcopy").onclick = e => copy(d.url, e.target);
+      $("rwa").href = waLink(d.name, d.url);
+      showReport(d.report);
       $("result").classList.add("show");
       picked = []; replaceSlug = null; $("files").textContent = ""; $("name").value = ""; $("slug").value = ""; checkSlug();
       $("fileInput").value = ""; $("folderInput").value = "";
@@ -324,6 +343,42 @@ $("go").onclick = () => {
   xhr.onerror = () => { bar.style.display="none"; setStatus("בעיית חיבור, נסו שוב", true); $("go").disabled = false; };
   xhr.send(fd);
 };
+
+/* ---------- sharing & upload report ---------- */
+const waLink = (name, url) => "https://wa.me/?text=" + encodeURIComponent((name ? name + "\n" : "") + url);
+function showReport(r){
+  const R = $("rreport"); R.innerHTML = "";
+  if (!r) return;
+  if (r.fixes && r.fixes.length) {
+    R.appendChild(el("div", null, "✨ שיפרנו אוטומטית:"));
+    const ul = el("ul"); for (const f of r.fixes) ul.appendChild(el("li", null, f)); R.appendChild(ul);
+  }
+  if (r.warnings && r.warnings.length) {
+    const t = el("div","w","⚠️ כדאי לבדוק:"); t.style.marginTop = "8px"; R.appendChild(t);
+    const ul = el("ul","w"); for (const w of r.warnings) ul.appendChild(el("li", null, w)); R.appendChild(ul);
+  }
+}
+
+/* ---------- stats panel ---------- */
+async function toggleStats(card, slug){
+  const old = card.querySelector(".statp");
+  if (old) { old.remove(); return; }
+  const P = el("div","datap statp","טוען…"); card.appendChild(P);
+  const r = await api("/api/sites/" + slug + "/stats");
+  P.textContent = "";
+  if (!r.ok) { P.textContent = r.data.error || "שגיאה"; return; }
+  const d = r.data;
+  const g = el("div","stats");
+  for (const [n, label] of [[d.today,"היום"],[d.week,"7 ימים"],[d.month,"30 יום"],[d.total,"סה״כ"]]) {
+    const c = el("div"); c.appendChild(el("b", null, n.toLocaleString())); c.appendChild(el("span", null, label)); g.appendChild(c);
+  }
+  P.appendChild(g);
+  const days = d.days.slice(-14), max = Math.max(1, ...days.map(x => x.n));
+  const bars = el("div","bars");
+  for (const x of days) { const b = el("i", x.n ? "" : "z"); b.style.height = Math.max(3, x.n / max * 100) + "%"; b.title = x.day + ": " + x.n; bars.appendChild(b); }
+  P.appendChild(bars);
+  P.appendChild(el("div","small","צפיות בדפים ב-14 הימים האחרונים. בוטים לא נספרים."));
+}
 
 /* ---------- creation limit (users) ---------- */
 function el(tag, cls, text){ const e=document.createElement(tag); if(cls) e.className=cls; if(text!=null) e.textContent=text; return e; }
@@ -420,13 +475,16 @@ async function loadList(){
     const el = document.createElement("div"); el.className = "site";
     el.innerHTML = '<div class="info"><div class="name"></div><div class="meta"></div></div>'
       + '<a class="btn sm" target="_blank" rel="noopener" style="text-decoration:none">פתיחה</a>'
-      + '<button class="btn sm ghost">קישור</button><button class="btn sm ghost">נתונים</button><button class="btn sm ghost">עדכון</button><button class="btn sm ghost danger">מחיקה</button>'
+      + '<button class="btn sm ghost">קישור</button><button class="btn sm ghost">📊</button><a class="btn sm wa" target="_blank" rel="noopener">וואטסאפ</a><button class="btn sm ghost">נתונים</button><button class="btn sm ghost">עדכון</button><button class="btn sm ghost danger">מחיקה</button>'
       + (ME && ME.admin && !s.mine ? '<button class="btn sm ghost danger">חסימת המשתמש</button>' : '');
     el.querySelector(".name").textContent = s.name || s.slug;
     el.querySelector(".meta").textContent = "/s/" + s.slug + "/  ·  " + fmtSize(s.size||0) + "  ·  " + fmtDate(s.created);
     if (ME && ME.admin && !s.mine && s.ownerEmail) { const o=document.createElement("div"); o.className="meta owner"; o.textContent = "הועלה ע״י " + s.ownerEmail; el.querySelector(".info").appendChild(o); }
     el.querySelector("a").href = s.url;
-    const [bl, bdata, bu, bd, bb] = el.querySelectorAll("button");
+    el.querySelector("a.wa").href = waLink(s.name, s.url);
+    const [bl, bstat, bdata, bu, bd, bb] = el.querySelectorAll("button");
+    bstat.title = "סטטיסטיקה";
+    bstat.onclick = () => toggleStats(el, s.slug);
     bdata.onclick = () => toggleData(el, s.slug);
     if (bb) bb.onclick = async () => {
       if (bb.dataset.sure !== "1") { bb.dataset.sure="1"; bb.textContent="לחסום ולמחוק את כל האתרים שלו?"; setTimeout(()=>{bb.dataset.sure="";bb.textContent="חסימת המשתמש";},4000); return; }

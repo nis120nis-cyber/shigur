@@ -36,6 +36,8 @@ export async function ensureSchema(env) {
       id INTEGER PRIMARY KEY AUTOINCREMENT, site TEXT NOT NULL, coll TEXT NOT NULL,
       data TEXT NOT NULL, created INTEGER NOT NULL)`),
     env.DB.prepare(`CREATE INDEX IF NOT EXISTS rec_site_coll ON records(site, coll, created)`),
+    env.DB.prepare(`CREATE TABLE IF NOT EXISTS views (
+      site TEXT NOT NULL, day TEXT NOT NULL, n INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(site, day))`),
     env.DB.prepare(`CREATE TABLE IF NOT EXISTS counters (
       site TEXT NOT NULL, name TEXT NOT NULL, value INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(site, name))`),
   ]);
@@ -164,6 +166,7 @@ export async function deleteSiteData(env, slug) {
   await env.DB.batch([
     env.DB.prepare("DELETE FROM records WHERE site = ?1").bind(slug),
     env.DB.prepare("DELETE FROM counters WHERE site = ?1").bind(slug),
+    env.DB.prepare("DELETE FROM views WHERE site = ?1").bind(slug),
   ]);
 }
 
@@ -200,3 +203,36 @@ export const SDK = `/* שיגור — מסד נתונים לאתר. תיעוד: 
   };
 })();
 `;
+
+// ---------- page-view stats ----------
+const BOT_RE = /bot|crawl|spider|slurp|preview|facebookexternalhit|whatsapp|telegram|discord|curl|wget|python|headless/i;
+const israelDay = (t = Date.now()) => new Date(t + 2 * 3600e3).toISOString().slice(0, 10); // close enough for daily buckets
+
+export function shouldCount(req) {
+  if (req.method !== "GET") return false;
+  if (BOT_RE.test(req.headers.get("user-agent") || "")) return false;
+  const purpose = req.headers.get("sec-purpose") || req.headers.get("purpose") || "";
+  if (/prefetch|prerender/i.test(purpose)) return false;
+  return true;
+}
+
+export async function recordView(env, slug) {
+  if (!env.DB) return;
+  try {
+    await ensureSchema(env);
+    await env.DB.prepare("INSERT INTO views (site, day, n) VALUES (?1, ?2, 1) ON CONFLICT(site, day) DO UPDATE SET n = n + 1")
+      .bind(slug, israelDay()).run();
+  } catch {}
+}
+
+export async function siteStats(env, slug) {
+  if (!env.DB) return { days: [], today: 0, week: 0, month: 0, total: 0 };
+  await ensureSchema(env);
+  const { results } = await env.DB.prepare("SELECT day, n FROM views WHERE site = ?1 ORDER BY day DESC LIMIT 400").bind(slug).all();
+  const total = (await env.DB.prepare("SELECT COALESCE(SUM(n),0) AS t FROM views WHERE site = ?1").bind(slug).first()).t;
+  const map = Object.fromEntries(results.map(r => [r.day, r.n]));
+  const days = [];
+  for (let i = 29; i >= 0; i--) { const d = israelDay(Date.now() - i * 864e5); days.push({ day: d, n: map[d] || 0 }); }
+  const sum = k => days.slice(-k).reduce((a, x) => a + x.n, 0);
+  return { days, today: sum(1), week: sum(7), month: sum(30), total };
+}

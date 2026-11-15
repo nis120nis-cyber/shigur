@@ -1,7 +1,8 @@
 import { unzipSync } from "fflate";
 import UI_HTML from "./ui.html";
 import { PRIVACY, TERMS, DOCS } from "./legal.js";
-import { handlePublicData, ownerSummary, ownerList, ownerDeleteRecord, ownerDeleteCollection, ownerResetCounter, deleteSiteData, NAME_OK, SDK } from "./data.js";
+import { improveSite } from "./improve.js";
+import { recordView, shouldCount, siteStats, handlePublicData, ownerSummary, ownerList, ownerDeleteRecord, ownerDeleteCollection, ownerResetCounter, deleteSiteData, NAME_OK, SDK } from "./data.js";
 
 // =====================================================================
 //  שיגור — upload files, get a live website
@@ -287,6 +288,7 @@ async function handleUpload(req, env, url, user) {
   if (paths.length > MAX_FILES) return json({ error: `יותר מדי קבצים (מקסימום ${MAX_FILES})` }, 413);
   if (!files["index.html"]) return json({ error: "חסר קובץ index.html באתר" }, 400);
   for (const p of paths) if (files[p].length > MAX_FILE) return json({ error: `הקובץ ${p} גדול מדי` }, 413);
+  const report = improveSite(files, name || slug || "האתר שלי", form.get("improve") !== "0");
 
   // daily quota
   const qKey = `q:${user.sub}:${today()}`;
@@ -332,7 +334,7 @@ async function handleUpload(req, env, url, user) {
   if (owner === user.sub && !mine.includes(slug)) { mine.push(slug); await setUserSites(env, user.sub, mine); }
   if (recent) { recent.push(Date.now()); await env.SITES.put("cl:" + user.sub, JSON.stringify(recent)); }
 
-  return json({ ok: true, slug, url: `${url.origin}/s/${slug}/` });
+  return json({ ok: true, slug, url: `${url.origin}/s/${slug}/`, name: meta.name, report });
 }
 
 async function deleteFiles(env, slug, meta) {
@@ -381,7 +383,7 @@ const SITE_SEC = {
   "strict-transport-security": "max-age=31536000; includeSubDomains",
 };
 
-async function serveSite(req, env, slug, rest) {
+async function serveSite(req, env, slug, rest, ctx) {
   let path;
   try { path = decodeURIComponent(rest || ""); } catch { path = rest || ""; }
   const tryKeys = (!path || path.endsWith("/")) ? [path + "index.html"] : [path, path + ".html", path + "/index.html"];
@@ -389,6 +391,7 @@ async function serveSite(req, env, slug, rest) {
     const { value, metadata } = await env.SITES.getWithMetadata(`f:${slug}:${p}`, "arrayBuffer");
     if (value) {
       if (p === path + "/index.html") return Response.redirect(new URL(req.url).href.replace(/\/?(\?.*)?$/, "/$1"), 301);
+      if (/\.html?$/i.test(p) && ctx && shouldCount(req)) ctx.waitUntil(recordView(env, slug));
       return new Response(req.method === "HEAD" ? null : value, {
         headers: {
           "content-type": (metadata && metadata.t) || typeOf(p),
@@ -427,7 +430,7 @@ function adminPage(env) {
 
 // ---------- router ----------
 export default {
-  async fetch(req, env) {
+  async fetch(req, env, ctx) {
     const url = new URL(req.url);
     const p = url.pathname;
     const ready = !!env.GOOGLE_CLIENT_ID;
@@ -435,7 +438,7 @@ export default {
     const m = p.match(/^\/s\/([a-z0-9-]+)(\/.*)?$/);
     if (m && (req.method === "GET" || req.method === "HEAD")) {
       if (!m[2]) return Response.redirect(`${url.origin}/s/${m[1]}/${url.search}`, 301);
-      return serveSite(req, env, m[1], m[2].slice(1));
+      return serveSite(req, env, m[1], m[2].slice(1), ctx);
     }
 
     // per-site database: public API for hosted sites + the JS library
@@ -496,13 +499,14 @@ export default {
       // ----- plan & purchase (any user) -----
       if (p === "/api/me/plan" && req.method === "GET") return json(await planFor(env, user));
       // owner: manage a site's data
-      const om = p.match(/^\/api\/sites\/([a-z0-9-]+)\/(data|counters)(?:\/([^/]+))?(?:\/(\d+))?$/);
+      const om = p.match(/^\/api\/sites\/([a-z0-9-]+)\/(data|counters|stats)(?:\/([^/]+))?(?:\/(\d+))?$/);
       if (om) {
         const [, slug, what, name, id] = om;
         const meta = await env.SITES.get("m:" + slug, "json");
         if (!meta) return json({ error: "לא נמצא" }, 404);
         if (meta.owner !== user.sub && !user.admin) return json({ error: "זה לא האתר שלך" }, 403);
         if (!env.DB) return json({ error: "מסד הנתונים לא מוגדר" }, 503);
+        if (what === "stats" && !name && req.method === "GET") return json(await siteStats(env, slug));
         if (name && !NAME_OK(name)) return json({ error: "שם לא תקין" }, 400);
         if (what === "data" && !name && req.method === "GET") return json(await ownerSummary(env, slug));
         if (what === "data" && name && !id && req.method === "GET") return json({ items: await ownerList(env, slug, name, url.searchParams.get("before")) });
