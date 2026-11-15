@@ -15,7 +15,7 @@ import { handlePublicData, ownerSummary, ownerList, ownerDeleteRecord, ownerDele
 const MAX_TOTAL = 50 * 1024 * 1024;   // 50MB per site (uncompressed)
 const MAX_FILE = 24 * 1024 * 1024;    // KV limit is 25MiB per value
 const MAX_FILES = 500;                // files per site
-const SITES_PER_USER = 10;            // admin is unlimited
+const FREE_SITES = 2;                 // free sites per user; more are bought one by one (admin is unlimited)
 const DAILY_FILES_PER_USER = 300;     // file writes per user per day (protects the free KV quota)
 const SESSION_DAYS = 7;
 const COOKIE = "__Host-shigur";
@@ -218,6 +218,33 @@ async function setUserSites(env, sub, list) {
   else await env.SITES.delete("u:" + sub);
 }
 
+// ---------- plans & payments (manual Bit/PayBox, approved by the admin) ----------
+async function credits(env, sub) {
+  return parseInt((await env.SITES.get("cr:" + sub)) || "0", 10);
+}
+async function paySettings(env) {
+  return (await env.SITES.get("sys:pay", "json")) || { price: 20, phone: "", name: "" };
+}
+function payCode() {
+  const a = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  return Array.from(crypto.getRandomValues(new Uint8Array(6)), b => a[b % a.length]).join("");
+}
+async function planFor(env, user) {
+  const mine = await userSites(env, user.sub);
+  const cr = await credits(env, user.sub);
+  const pay = await paySettings(env);
+  const code = await env.SITES.get("pu:" + user.sub);
+  let pending = null;
+  if (code) {
+    const r = await env.SITES.get("pr:" + code, "json");
+    if (r) pending = { code, created: r.created };
+  }
+  return {
+    used: mine.length, free: FREE_SITES, credits: cr, allowed: user.admin ? null : FREE_SITES + cr,
+    price: pay.price, phone: pay.phone, payName: pay.name, payReady: !!pay.phone, pending,
+  };
+}
+
 // ---------- upload ----------
 async function handleUpload(req, env, url, user) {
   const len = parseInt(req.headers.get("content-length") || "0", 10);
@@ -290,8 +317,11 @@ async function handleUpload(req, env, url, user) {
   } else {
     do { slug = randomSlug(); } while (await env.SITES.get("m:" + slug));
   }
-  if (!existing && !user.admin && mine.length >= SITES_PER_USER) {
-    return json({ error: `אפשר עד ${SITES_PER_USER} אתרים לחשבון. מחקו אתר ישן כדי להעלות חדש.` }, 403);
+  if (!existing && !user.admin) {
+    const allowed = FREE_SITES + (await credits(env, user.sub));
+    if (mine.length >= allowed) {
+      return json({ error: `הגעתם למכסה (${allowed} אתרים). אפשר לקנות אתר נוסף או למחוק אתר ישן.`, needPurchase: true }, 403);
+    }
   }
 
   const owner = existing ? existing.owner : user.sub;
@@ -468,6 +498,64 @@ export default {
       if (del && req.method === "DELETE") {
         const r = await deleteSite(env, del[1], user);
         return json(r.ok ? { ok: true } : { error: r.status === 403 ? "זה לא האתר שלך" : "לא נמצא" }, r.ok ? 200 : r.status);
+      }
+
+      // ----- plan & purchase (any user) -----
+      if (p === "/api/me/plan" && req.method === "GET") return json(await planFor(env, user));
+      if (p === "/api/me/purchase" && req.method === "POST") {
+        const pay = await paySettings(env);
+        if (!pay.phone) return json({ error: "התשלום עוד לא הוגדר. נסו מאוחר יותר." }, 503);
+        let code = await env.SITES.get("pu:" + user.sub);
+        if (!code || !(await env.SITES.get("pr:" + code))) {
+          code = payCode();
+          const reqd = { code, sub: user.sub, email: user.email, name: user.name, price: pay.price, created: Date.now() };
+          await env.SITES.put("pr:" + code, JSON.stringify(reqd), { metadata: reqd, expirationTtl: 30 * 86400 });
+          await env.SITES.put("pu:" + user.sub, code, { expirationTtl: 30 * 86400 });
+        }
+        return json(await planFor(env, user));
+      }
+      if (p === "/api/me/purchase" && req.method === "DELETE") {
+        const code = await env.SITES.get("pu:" + user.sub);
+        if (code) { await env.SITES.delete("pr:" + code); await env.SITES.delete("pu:" + user.sub); }
+        return json(await planFor(env, user));
+      }
+
+      // ----- admin: payment settings & approving purchases -----
+      if (p.startsWith("/api/admin/")) {
+        if (!user.admin) return json({ error: "אין הרשאה" }, 403);
+        if (p === "/api/admin/pay" && req.method === "GET") return json(await paySettings(env));
+        if (p === "/api/admin/pay" && req.method === "POST") {
+          let b = {};
+          try { b = await req.json(); } catch {}
+          const price = parseInt(b.price, 10);
+          const phone = String(b.phone || "").replace(/[\s-]/g, "");
+          const name = String(b.name || "").replace(/[\x00-\x1f<>]/g, "").slice(0, 40);
+          if (!(price >= 1 && price <= 1000)) return json({ error: "מחיר לא תקין (1-1000 ₪)" }, 400);
+          if (phone && !/^05\d{8}$/.test(phone)) return json({ error: "מספר טלפון לא תקין (05XXXXXXXX)" }, 400);
+          await env.SITES.put("sys:pay", JSON.stringify({ price, phone, name }));
+          return json({ ok: true, price, phone, name });
+        }
+        if (p === "/api/admin/requests" && req.method === "GET") {
+          const out = [];
+          let cursor;
+          do {
+            const r = await env.SITES.list({ prefix: "pr:", cursor });
+            for (const k of r.keys) if (k.metadata) out.push(k.metadata);
+            cursor = r.list_complete ? null : r.cursor;
+          } while (cursor);
+          out.sort((a, b) => b.created - a.created);
+          return json({ requests: out });
+        }
+        const rm = p.match(/^\/api\/admin\/requests\/([A-Z0-9]{6})\/(approve|reject)$/);
+        if (rm && req.method === "POST") {
+          const r = await env.SITES.get("pr:" + rm[1], "json");
+          if (!r) return json({ error: "הבקשה לא נמצאה" }, 404);
+          if (rm[2] === "approve") await env.SITES.put("cr:" + r.sub, String((await credits(env, r.sub)) + 1));
+          await env.SITES.delete("pr:" + rm[1]);
+          await env.SITES.delete("pu:" + r.sub);
+          return json({ ok: true });
+        }
+        return json({ error: "לא נמצא" }, 404);
       }
 
       // owner: manage a site's data
