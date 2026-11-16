@@ -2,7 +2,6 @@ import { unzipSync } from "fflate";
 import UI_HTML from "./ui.html";
 import { PRIVACY, TERMS, DOCS } from "./legal.js";
 import { improveSite } from "./improve.js";
-import { PROVIDERS, providerConfig, enabledProviders, startLogin, finishLogin } from "./oauth.js";
 import { recordView, shouldCount, siteStats, handlePublicData, ownerSummary, ownerList, ownerDeleteRecord, ownerDeleteCollection, ownerResetCounter, deleteSiteData, NAME_OK, SDK } from "./data.js";
 
 // =====================================================================
@@ -160,10 +159,7 @@ function sameOrigin(req, url) {
   return true;
 }
 
-// Admin is recognised only through a Google sign-in (verified email). A GitHub or
-// Microsoft account showing the same address never becomes admin.
-async function isAdmin(env, email, via) {
-  if ((via || "google") !== "google") return false;
+async function isAdmin(env, email) {
   return !!env.ADMIN_EMAIL_SHA256 && (await sha256hex(email)) === env.ADMIN_EMAIL_SHA256;
 }
 
@@ -172,7 +168,7 @@ async function currentUser(req, env, url) {
   const s = await readSession(env, getCookie(req, COOKIE));
   if (!s) return null;
   if (await env.SITES.get("ban:" + s.sub)) return null;
-  s.admin = await isAdmin(env, s.email, s.via);
+  s.admin = await isAdmin(env, s.email);
   return s;
 }
 
@@ -453,12 +449,6 @@ export default {
     if (dm) return handlePublicData(req, env, dm[1], dm[2]);
     if (p.startsWith("/api/data/")) return json({ error: "not found" }, 404);
 
-    const au = p.match(/^\/auth\/(github|microsoft)(\/callback)?$/);
-    if (au && req.method === "GET") {
-      return au[2] ? finishLogin(req, env, url, au[1], { makeSession, sessionCookie, sessionDays: SESSION_DAYS })
-                   : startLogin(req, env, url, au[1]);
-    }
-
     if (p === "/" && req.method === "GET") return adminPage(env);
     if (p === "/docs") {
       return new Response(DOCS, { headers: { "content-type": "text/html; charset=utf-8", "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'", ...BASE_SEC } });
@@ -473,9 +463,9 @@ export default {
         let me = null;
         if (ready) {
           const s = await readSession(env, getCookie(req, COOKIE));
-          if (s && !(await env.SITES.get("ban:" + s.sub))) me = { name: s.name, email: s.email, via: s.via || "google", admin: await isAdmin(env, s.email, s.via) };
+          if (s && !(await env.SITES.get("ban:" + s.sub))) me = { name: s.name, email: s.email, admin: await isAdmin(env, s.email) };
         }
-        return json({ ready, me, providers: await enabledProviders(env) });
+        return json({ ready, me });
       }
       if (!ready) return json({ error: "האתר לא מוגדר" }, 503);
 
@@ -487,9 +477,8 @@ export default {
         try { user = await verifyGoogleToken(env, url, body.credential); } catch { return json({ error: "לא הצלחנו לאמת מול גוגל, נסו שוב" }, 502); }
         if (!user) return json({ error: "ההתחברות נכשלה" }, 401);
         if (await env.SITES.get("ban:" + user.sub)) return json({ error: "החשבון הזה נחסם" }, 403);
-        user.via = "google";
-        const admin = await isAdmin(env, user.email, "google");
-        return json({ ok: true, me: { name: user.name, email: user.email, via: "google", admin } }, 200,
+        const admin = await isAdmin(env, user.email);
+        return json({ ok: true, me: { name: user.name, email: user.email, admin } }, 200,
           { "set-cookie": sessionCookie(await makeSession(env, user), SESSION_DAYS * 86400) });
       }
 
@@ -509,33 +498,6 @@ export default {
 
       // ----- plan & purchase (any user) -----
       if (p === "/api/me/plan" && req.method === "GET") return json(await planFor(env, user));
-      // ----- admin: sign-in providers -----
-      if (p === "/api/admin/oauth") {
-        if (!user.admin) return json({ error: "אין הרשאה" }, 403);
-        if (req.method === "GET") {
-          const out = {};
-          for (const name of Object.keys(PROVIDERS)) {
-            const c = await providerConfig(env, name);
-            out[name] = { configured: !!(c && c.id && c.secret), id: c ? c.id : "", callback: `${url.origin}/auth/${name}/callback` };
-          }
-          return json(out);
-        }
-        if (req.method === "POST") {
-          let b = {};
-          try { b = await req.json(); } catch {}
-          const name = String(b.provider || "");
-          if (!PROVIDERS[name]) return json({ error: "ספק לא מוכר" }, 400);
-          if (b.remove) { await env.SITES.delete("sys:oauth:" + name); return json({ ok: true }); }
-          const id = String(b.id || "").trim(), secret = String(b.secret || "").trim();
-          if (!/^[A-Za-z0-9._\-]{8,200}$/.test(id)) return json({ error: "Client ID לא תקין" }, 400);
-          const old = await providerConfig(env, name);
-          const sec = secret || (old && old.id === id ? old.secret : "");
-          if (!/^[\x21-\x7e]{10,300}$/.test(sec)) return json({ error: "חסר Client secret תקין" }, 400);
-          await env.SITES.put("sys:oauth:" + name, JSON.stringify({ id, secret: sec }));
-          return json({ ok: true });
-        }
-      }
-
       // owner: manage a site's data
       const om = p.match(/^\/api\/sites\/([a-z0-9-]+)\/(data|counters|stats)(?:\/([^/]+))?(?:\/(\d+))?$/);
       if (om) {
