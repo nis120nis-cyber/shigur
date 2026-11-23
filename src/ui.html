@@ -4,160 +4,236 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>שיגור — מעלים קבצים, מקבלים אתר</title>
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🚀</text></svg>">
+<meta name="theme-color" content="#F7F6F2">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='8' fill='%231E463A'/><text x='32' y='46' font-size='40' text-anchor='middle' fill='%23F7F6F2' font-family='serif'>ש</text></svg>">
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Rubik:wght@400;500;700;900&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Frank+Ruhl+Libre:wght@500;700&family=Heebo:wght@400;500;700&display=swap" rel="stylesheet">
 <script src="https://accounts.google.com/gsi/client" async></script>
 <style>
-  :root{--bg:#0d0f14;--panel:#161a22;--panel2:#1c212b;--line:#262c38;--text:#eef1f6;--muted:#8c95a6;--accent:#7cff6b;--ink:#0b1a08;--danger:#ff6b6b;--warn:#ffd36b}
+  :root{
+    --bg:#F7F6F2; --panel:#FDFCFA; --panel2:#F2F0EB; --line:#E5E2DC; --line2:#D6D2CA;
+    --text:#1A1A1A; --muted:#5C5A54; --accent:#1E463A; --accent-tint:#EEF2EF; --ink:#F7F6F2;
+    --danger:#A33A2A; --warn:#8A5A1E;
+    --serif:"Frank Ruhl Libre", "Times New Roman", serif;
+    --sans:Heebo, system-ui, sans-serif;
+    --r:6px; --ease:150ms ease;
+  }
   *{box-sizing:border-box}
-  body{margin:0;font-family:Rubik,system-ui,sans-serif;background:var(--bg);color:var(--text);-webkit-font-smoothing:antialiased;min-height:100vh}
-  button,input{font:inherit}
+  html{-webkit-text-size-adjust:100%}
+  body{margin:0;font-family:var(--sans);font-size:16px;line-height:1.6;background:var(--bg);color:var(--text);-webkit-font-smoothing:antialiased}
+  button,input,select,textarea{font:inherit;color:inherit}
   button{cursor:pointer}
-  .wrap{max-width:760px;margin:0 auto;padding:36px 20px 70px}
-  h1{font-size:clamp(40px,9vw,64px);font-weight:900;margin:0;letter-spacing:-1.5px;line-height:1}
-  h1 span{color:var(--accent)}
-  .sub{color:var(--muted);margin:10px 0 30px;font-size:17px}
-  .card{background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:20px}
-  .drop{border:2px dashed var(--line);border-radius:16px;padding:38px 18px;text-align:center;transition:.15s;background:var(--panel2)}
-  .drop.over{border-color:var(--accent);background:#17231a}
-  .icon{width:54px;height:54px;margin:0 auto 12px;border-radius:15px;background:var(--accent);color:var(--ink);display:grid;place-items:center;font-size:28px;font-weight:900}
-  .big{font-size:20px;font-weight:700}
-  .small{color:var(--muted);font-size:14px;margin-top:6px}
-  .pick{display:flex;gap:8px;justify-content:center;margin-top:16px;flex-wrap:wrap}
-  .btn{background:var(--accent);color:var(--ink);border:0;border-radius:12px;padding:12px 20px;font-weight:700;font-size:16px}
-  .btn:disabled{opacity:.4;cursor:not-allowed}
-  .btn.ghost{background:transparent;color:var(--text);border:1px solid var(--line)}
-  .btn.sm{padding:8px 12px;font-size:14px;border-radius:10px}
-  .btn.danger{color:var(--danger);border-color:#4a2626}
-  .btn.full{width:100%;padding:15px;font-size:17px}
-  label{display:block;font-size:14px;color:var(--muted);margin:18px 0 7px}
-  .field{width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:12px;padding:13px 14px;font-size:16px}
-  .field:focus{outline:2px solid var(--accent);outline-offset:-1px}
-  .slugbox{display:flex;align-items:stretch;direction:ltr;background:var(--panel2);border:1px solid var(--line);border-radius:12px;overflow:hidden}
-  .slugbox:focus-within{outline:2px solid var(--accent);outline-offset:-1px}
-  .slugbox .pre{padding:13px 2px 13px 14px;color:var(--muted);font-size:14px;white-space:nowrap;display:flex;align-items:center;max-width:55%;overflow:hidden;text-overflow:ellipsis}
-  .slugbox input{flex:1;min-width:60px;background:transparent;border:0;color:var(--text);padding:13px 14px 13px 2px;font-size:16px;outline:none}
-  .hint{font-size:13px;margin-top:6px;min-height:18px;color:var(--muted)}
+  a{color:var(--accent)}
+  ::selection{background:#D8E2DC}
+  .wrap{max-width:780px;margin:0 auto;padding:0 24px}
+
+  /* masthead */
+  .mast{padding:72px 0 40px}
+  .kicker{font-size:13px;letter-spacing:.08em;color:var(--muted);text-transform:uppercase;margin-bottom:18px}
+  h1{font-family:var(--serif);font-weight:700;font-size:clamp(56px,13vw,104px);line-height:.95;letter-spacing:-.03em;margin:0}
+  .sub{font-family:var(--serif);font-weight:500;font-size:clamp(20px,4.4vw,26px);line-height:1.4;color:var(--muted);margin:22px 0 0;max-width:30ch}
+  hr,.rule{border:0;border-top:1px solid var(--line);margin:0}
+
+  /* sections */
+  .sec{padding:56px 0}
+  .sec-head{display:flex;align-items:baseline;gap:16px;margin-bottom:28px}
+  .num{font-family:var(--serif);font-size:15px;color:var(--muted);font-variant-numeric:tabular-nums}
+  h2{font-family:var(--serif);font-weight:700;font-size:clamp(28px,6vw,38px);line-height:1.15;letter-spacing:-.02em;margin:0}
+  .big{font-family:var(--serif);font-weight:700;font-size:22px;letter-spacing:-.01em;line-height:1.3}
+  .small{color:var(--muted);font-size:14px;margin-top:6px;line-height:1.6}
+
+  /* surfaces */
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:24px}
+  .drop{border:1px dashed var(--line2);border-radius:var(--r);padding:40px 20px;text-align:right;background:var(--bg);transition:border-color var(--ease),background var(--ease)}
+  .drop.over{border-color:var(--accent);background:var(--accent-tint)}
+  .icon{width:40px;height:40px;border:1px solid var(--line2);border-radius:var(--r);display:grid;place-items:center;margin-bottom:16px;color:var(--text)}
+  .pick{display:flex;gap:8px;margin-top:20px;flex-wrap:wrap}
+
+  /* buttons */
+  .btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;background:var(--accent);color:var(--ink);border:1px solid var(--accent);border-radius:var(--r);padding:11px 20px;font-weight:500;font-size:16px;text-decoration:none;transition:background var(--ease),border-color var(--ease),color var(--ease)}
+  .btn:hover{background:#173A30;border-color:#173A30}
+  .btn:disabled{opacity:.35;cursor:not-allowed}
+  .btn.ghost{background:transparent;color:var(--text);border-color:var(--line2)}
+  .btn.ghost:hover{background:var(--panel2);border-color:#BDB8AE}
+  .btn.sm{padding:6px 12px;font-size:14px}
+  .btn.danger{color:var(--danger);border-color:var(--line2)}
+  .btn.danger:hover{background:#F6ECE9;border-color:#D9B5AC}
+  .btn.full{width:100%;padding:14px;font-size:17px}
+  .out,.lnk{background:none;border:0;padding:0;font-size:14px;color:var(--muted);text-decoration:underline;text-underline-offset:3px;transition:color var(--ease)}
+  .out:hover{color:var(--text)}
+  .lnk{color:var(--accent)}
+
+  /* form */
+  label{display:block;font-size:14px;font-weight:500;color:var(--text);margin:24px 0 8px}
+  .field{width:100%;background:var(--panel);border:1px solid var(--line2);border-radius:var(--r);padding:12px 14px;font-size:16px;transition:border-color var(--ease)}
+  .field:hover{border-color:#BDB8AE}
+  .field:focus{outline:none;border-color:var(--accent)}
+  .slugbox{display:flex;align-items:stretch;direction:ltr;background:var(--panel);border:1px solid var(--line2);border-radius:var(--r);overflow:hidden;transition:border-color var(--ease)}
+  .slugbox:focus-within{border-color:var(--accent)}
+  .slugbox .pre{padding:12px 2px 12px 14px;color:var(--muted);font-size:15px;white-space:nowrap;display:flex;align-items:center;background:var(--panel2);border-right:1px solid var(--line)}
+  .slugbox .pre{padding-right:10px;margin-right:2px}
+  .slugbox input{flex:1;min-width:60px;background:transparent;border:0;padding:12px 14px 12px 8px;font-size:16px;outline:none}
+  .hint{font-size:13px;margin-top:8px;min-height:20px;color:var(--muted)}
   .hint.ok{color:var(--accent)} .hint.bad{color:var(--danger)}
-  .files{margin-top:14px;font-size:14px;color:var(--muted)}
-  .files b{color:var(--text)}
-  .status{margin-top:14px;font-size:15px;min-height:22px}
+  .files{margin-top:16px;font-size:14px;color:var(--muted)}
+  .files b{color:var(--text);font-weight:500}
+  .chk{display:flex;align-items:flex-start;gap:12px;margin-top:24px;cursor:pointer;font-size:15px;font-weight:400;line-height:1.6;padding:14px 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+  .chk input{width:18px;height:18px;accent-color:var(--accent);margin-top:4px;flex-shrink:0}
+  .chk b{font-weight:500}
+  .status{margin-top:14px;font-size:15px;min-height:24px;color:var(--muted)}
   .status.err{color:var(--danger)}
-  .bar{height:6px;background:var(--line);border-radius:99px;overflow:hidden;margin-top:12px;display:none}
-  .bar i{display:block;height:100%;width:0;background:var(--accent);transition:width .2s}
-  .result{margin-top:18px;background:#142014;border:1px solid #2c4a28;border-radius:16px;padding:18px;display:none}
+  .bar{height:2px;background:var(--line);overflow:hidden;margin-top:16px;display:none}
+  .bar i{display:block;height:100%;width:0;background:var(--accent);transition:width .2s linear}
+
+  /* result */
+  .result{margin-top:28px;border:1px solid var(--line);border-top:2px solid var(--accent);border-radius:var(--r);background:var(--panel);padding:22px;display:none}
   .result.show{display:block}
-  .result .t{font-weight:700;font-size:18px;margin-bottom:10px}
-  .link{direction:ltr;text-align:left;background:#0b120a;border-radius:10px;padding:11px 13px;font-family:ui-monospace,monospace;font-size:14px;word-break:break-all;color:var(--accent);display:block;text-decoration:none}
-  .row{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}
-  h2{font-size:21px;margin:44px 0 14px;display:flex;justify-content:space-between;align-items:center}
-  .list{display:flex;flex-direction:column;gap:10px}
-  .site{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
-  .site .info{flex:1;min-width:170px}
-  .site .name{font-weight:700}
-  .site .meta{color:var(--muted);font-size:13px;margin-top:3px;direction:ltr;text-align:right}
-  .empty{color:var(--muted);padding:12px 0}
-  .login{max-width:420px}
-  .center{display:grid;place-items:center;min-height:60vh}
-  .warn{background:#2a2410;border:1px solid #5a4a1a;color:var(--warn);border-radius:14px;padding:16px;line-height:1.6}
-  .out{font-size:14px;color:var(--muted);text-decoration:underline;background:none;border:0;padding:0}
-  .hidden{display:none!important}
-  .who{display:flex;align-items:center;gap:10px;justify-content:space-between;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:10px 14px;margin-bottom:16px;font-size:14px;color:var(--muted)}
-  .who b{color:var(--text)}
-  .badge{background:var(--accent);color:var(--ink);border-radius:99px;padding:2px 8px;font-size:12px;font-weight:700;margin-inline-start:6px}
-  #gbtn{display:flex;justify-content:center;margin-top:18px;min-height:44px}
-  .owner{color:var(--warn)}
-  .datap{flex-basis:100%;background:var(--panel2);border:1px solid var(--line);border-radius:12px;padding:12px;margin-top:4px;font-size:14px}
-  .datap .row2{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--line)}
-  .datap .row2:last-child{border-bottom:0}
-  .rec{direction:ltr;text-align:left;font-family:ui-monospace,monospace;font-size:12px;white-space:pre-wrap;word-break:break-word;flex:1;color:var(--text)}
-  .lnk{color:var(--accent);background:none;border:0;padding:0;font-size:14px;text-decoration:underline}
-  .plan{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:16px}
-  .plan .meter{height:8px;background:var(--line);border-radius:99px;overflow:hidden;margin:8px 0}
-  .plan .meter i{display:block;height:100%;background:var(--accent)}
-  .chk{display:flex;align-items:flex-start;gap:10px;margin-top:16px;cursor:pointer;font-size:15px;line-height:1.5}
-  .chk input{width:20px;height:20px;accent-color:var(--accent);margin-top:2px;flex-shrink:0}
-  .rep{margin-top:12px;font-size:14px;line-height:1.7}
-  .rep ul{margin:4px 0 0;padding-inline-start:20px}
+  .result .t{font-family:var(--serif);font-weight:700;font-size:24px;letter-spacing:-.01em;margin-bottom:12px}
+  .link{direction:ltr;text-align:left;display:block;background:var(--panel2);border:1px solid var(--line);border-radius:var(--r);padding:10px 12px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:14px;word-break:break-all;color:var(--text);text-decoration:none;transition:border-color var(--ease)}
+  .link:hover{border-color:var(--line2)}
+  .row{display:flex;gap:8px;margin-top:14px;flex-wrap:wrap}
+  .rep{margin-top:16px;font-size:14px;line-height:1.7;color:var(--muted)}
+  .rep>div{color:var(--text);font-weight:500}
+  .rep ul{margin:4px 0 0;padding-inline-start:18px}
   .rep .w{color:var(--warn)}
-  .wa{background:#25D366!important;color:#06280f!important;text-decoration:none}
-  .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;text-align:center;margin-bottom:12px}
-  .stats b{display:block;font-size:22px;color:var(--text)}
+  .docs{display:inline-block;margin-top:24px;font-size:15px;color:var(--text);text-decoration:none;border-bottom:1px solid var(--line2);padding-bottom:2px;transition:border-color var(--ease)}
+  .docs:hover{border-color:var(--text)}
+
+  /* account line & plan */
+  .who{display:flex;align-items:baseline;gap:12px;justify-content:space-between;padding:16px 0;border-bottom:1px solid var(--line);font-size:14px;color:var(--muted)}
+  .who b{color:var(--text);font-weight:500}
+  .badge{display:inline-block;border:1px solid var(--accent);color:var(--accent);border-radius:3px;padding:0 6px;font-size:12px;font-weight:500;margin-inline-start:8px;line-height:1.6}
+  .plan{padding:20px 0 4px;font-size:15px}
+  .plan .meter{height:2px;background:var(--line);overflow:hidden;margin:10px 0}
+  .plan .meter i{display:block;height:100%;background:var(--accent)}
+
+  /* site list */
+  .list{border-top:1px solid var(--line)}
+  .site{display:flex;flex-wrap:wrap;align-items:flex-start;gap:10px 16px;padding:22px 0;border-bottom:1px solid var(--line)}
+  .site .info{flex:1 1 100%;min-width:0}
+  .site .name{font-family:var(--serif);font-weight:700;font-size:21px;letter-spacing:-.01em;line-height:1.3}
+  .site .meta{color:var(--muted);font-size:13px;margin-top:4px;direction:ltr;text-align:right;font-variant-numeric:tabular-nums}
+  .site .owner{color:var(--warn)}
+  .site>.btn,.site>a.btn{padding:5px 10px;font-size:13px}
+  .empty{color:var(--muted);padding:22px 0}
+
+  /* panels inside a site row */
+  .datap{flex-basis:100%;background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:16px;margin-top:4px;font-size:14px}
+  .datap .row2{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--line)}
+  .datap .row2:last-child{border-bottom:0}
+  .rec{direction:ltr;text-align:left;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;white-space:pre-wrap;word-break:break-word;flex:1;color:var(--text)}
+  .stats{display:grid;grid-template-columns:repeat(4,1fr);border-top:1px solid var(--line);border-bottom:1px solid var(--line);margin-bottom:16px}
+  .stats>div{padding:12px 8px;text-align:right}
+  .stats>div+div{border-right:1px solid var(--line)}
+  .stats b{display:block;font-family:var(--serif);font-size:26px;font-weight:700;line-height:1.2;font-variant-numeric:tabular-nums}
   .stats span{font-size:12px;color:var(--muted)}
-  .bars{display:flex;align-items:flex-end;gap:3px;height:80px;direction:ltr}
-  .bars i{flex:1;background:var(--accent);border-radius:3px 3px 0 0;min-height:2px;opacity:.85}
+  .bars{display:flex;align-items:flex-end;gap:3px;height:72px;direction:ltr}
+  .bars i{flex:1;background:var(--accent);min-height:2px}
   .bars i.z{background:var(--line)}
-  .docs{display:block;text-align:center;margin-top:14px;color:var(--accent);font-size:15px}
+
+  /* login, notices, footer */
+  .login{max-width:460px}
+  #gbtn{display:flex;justify-content:flex-start;margin-top:24px;min-height:44px}
+  .warn{border:1px solid #E2D3BC;background:#FAF5EC;color:var(--warn);border-radius:var(--r);padding:16px 18px;margin-top:32px;line-height:1.7}
+  .foot{display:flex;gap:18px;flex-wrap:wrap;padding:28px 0 56px;border-top:1px solid var(--line);font-size:13px;color:var(--muted)}
+  .foot a{color:var(--muted);text-decoration:none;transition:color var(--ease)}
+  .foot a:hover{color:var(--text)}
+  .hidden{display:none!important}
+
+  @media (max-width:520px){
+    .wrap{padding:0 18px}
+    .mast{padding:48px 0 32px}
+    .sec{padding:40px 0}
+    .card{padding:18px}
+    .stats{grid-template-columns:repeat(2,1fr)}
+    .stats>div:nth-child(3){border-right:0}
+    .stats>div:nth-child(n+3){border-top:1px solid var(--line)}
+  }
 </style>
 </head>
 <body>
 <div class="wrap">
-  <h1>שיגור<span>.</span></h1>
-  <p class="sub">מעלים קבצים — מקבלים אתר אמיתי עם קישור שכל אחד יכול לפתוח.</p>
+  <header class="mast">
+    <div class="kicker">אחסון אתרים, בלי שרתים ובלי עלות</div>
+    <h1>שיגור</h1>
+    <p class="sub">מעלים קובץ, מקבלים אתר חי עם קישור שכל אחד יכול לפתוח.</p>
+  </header>
+  <hr>
 
   <div id="setup" class="warn hidden">
     האתר עדיין לא מחובר להתחברות עם גוגל: חסר <b>GOOGLE_CLIENT_ID</b> בהגדרות. ברגע שהוא יוגדר, הדף יעבוד.
   </div>
 
   <!-- login -->
-  <div id="loginView" class="card login hidden">
-    <div class="big" style="margin-bottom:4px">התחברות</div>
-    <div class="small">מתחברים עם חשבון גוגל כדי להעלות ולנהל אתרים. לצפייה באתרים לא צריך להתחבר.</div>
+  <section id="loginView" class="sec login hidden">
+    <h2>כניסה</h2>
+    <p class="small" style="font-size:16px">מתחברים עם חשבון גוגל כדי להעלות ולנהל אתרים. לצפייה באתרים לא צריך להתחבר.</p>
     <div id="gbtn"></div>
     <div class="status err" id="loginErr"></div>
-  </div>
+  </section>
 
   <!-- main -->
   <div id="mainView" class="hidden">
     <div class="who"><span>מחובר/ת כ-<b id="meName"></b><span id="meAdmin" class="badge hidden">מנהל</span></span><button class="out" id="logout">יציאה</button></div>
     <div id="planBox" class="plan hidden"></div>
 
-    <div class="card">
-      <div class="drop" id="drop">
-        <div class="icon">↑</div>
-        <div class="big">גררו לכאן קבצים או תיקייה</div>
-        <div class="small">קובץ HTML, קובץ ZIP של אתר שלם, או כמה קבצים יחד</div>
-        <div class="pick">
-          <button class="btn sm" id="pickFiles">בחירת קבצים</button>
-          <button class="btn sm ghost" id="pickFolder">בחירת תיקייה</button>
+    <section class="sec">
+      <div class="sec-head"><span class="num">01</span><h2>אתר חדש</h2></div>
+      <div class="card">
+        <div class="drop" id="drop">
+          <div class="icon" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4M6 10l6-6 6 6M4 20h16"/></svg></div>
+          <div class="big">גררו לכאן קבצים או תיקייה</div>
+          <div class="small">קובץ HTML, קובץ ZIP של אתר שלם, או כמה קבצים יחד.</div>
+          <div class="pick">
+            <button class="btn sm" id="pickFiles">בחירת קבצים</button>
+            <button class="btn sm ghost" id="pickFolder">בחירת תיקייה</button>
+          </div>
+          <input type="file" id="fileInput" multiple class="hidden" accept=".html,.htm,.zip,.css,.js,.png,.jpg,.jpeg,.gif,.svg,.webp,.ico,.json,.woff,.woff2,.ttf,.mp4,.mp3,.pdf,.txt">
+          <input type="file" id="folderInput" webkitdirectory directory multiple class="hidden">
         </div>
-        <input type="file" id="fileInput" multiple class="hidden" accept=".html,.htm,.zip,.css,.js,.png,.jpg,.jpeg,.gif,.svg,.webp,.ico,.json,.woff,.woff2,.ttf,.mp4,.mp3,.pdf,.txt">
-        <input type="file" id="folderInput" webkitdirectory directory multiple class="hidden">
+        <div class="files" id="files"></div>
+
+        <label for="name">שם האתר</label>
+        <input id="name" class="field" placeholder="למשל: דף הנחיתה שלי" maxlength="80">
+
+        <label for="slug">כתובת האתר</label>
+        <div class="slugbox"><span class="pre" id="pre"></span><input id="slug" placeholder="my-site" maxlength="40" autocapitalize="off" autocomplete="off" spellcheck="false"></div>
+        <div class="hint" id="slugHint">אותיות באנגלית, מספרים ומקפים. השאירו ריק לכתובת אקראית.</div>
+
+        <label class="chk"><input type="checkbox" id="improve" checked><span><b>שיפור אוטומטי</b> <span style="color:var(--muted)">(מומלץ)</span><br><span class="small">מתקן תצוגה בטלפון, עברית וכיוון מימין לשמאל, מוסיף תצוגה מקדימה לוואטסאפ ומאיץ תמונות. העיצוב נשאר כמו שהוא.</span></span></label>
+
+        <div class="bar" id="bar"><i></i></div>
+        <div class="status" id="status"></div>
+        <button class="btn full" id="go" disabled style="margin-top:6px">שיגור האתר</button>
       </div>
-      <div class="files" id="files"></div>
 
-      <label for="name">שם האתר</label>
-      <input id="name" class="field" placeholder="למשל: דף הנחיתה שלי" maxlength="80">
-
-      <label for="slug">כתובת האתר</label>
-      <div class="slugbox"><span class="pre" id="pre"></span><input id="slug" placeholder="my-site" maxlength="40" autocapitalize="off" autocomplete="off" spellcheck="false"></div>
-      <div class="hint" id="slugHint">אותיות באנגלית, מספרים ומקפים. השאירו ריק לכתובת אקראית.</div>
-
-      <label class="chk"><input type="checkbox" id="improve" checked><span><b>✨ שיפור אוטומטי</b> (מומלץ)<br><span class="small">מתקן תצוגה בטלפון, עברית ו-RTL, מוסיף תצוגה מקדימה לוואטסאפ ומאיץ תמונות. לא משנה את העיצוב.</span></span></label>
-
-      <div class="bar" id="bar"><i></i></div>
-      <div class="status" id="status"></div>
-      <button class="btn full" id="go" disabled style="margin-top:8px">שגר אתר 🚀</button>
-    </div>
-
-    <a class="docs" href="/docs" target="_blank" rel="noopener">📖 איך מוסיפים לאתר תגובות, שיאים, לייקים וטפסים</a>
-
-    <div class="result" id="result">
-      <div class="t">✅ האתר באוויר!</div>
-      <a class="link" id="rlink" target="_blank" rel="noopener"></a>
-      <div id="rreport" class="rep"></div>
-      <div class="row">
-        <a class="btn sm wa" id="rwa" target="_blank" rel="noopener">שיתוף בוואטסאפ</a>
-        <button class="btn sm" id="rcopy">העתקת קישור</button>
-        <a class="btn sm ghost" id="ropen" target="_blank" rel="noopener" style="text-decoration:none">פתיחת האתר</a>
+      <div class="result" id="result">
+        <div class="t">האתר באוויר.</div>
+        <a class="link" id="rlink" target="_blank" rel="noopener"></a>
+        <div id="rreport" class="rep"></div>
+        <div class="row">
+          <button class="btn sm" id="rcopy">העתקת קישור</button>
+          <a class="btn sm ghost wa" id="rwa" target="_blank" rel="noopener">שיתוף בוואטסאפ</a>
+          <a class="btn sm ghost" id="ropen" target="_blank" rel="noopener">פתיחת האתר</a>
+        </div>
       </div>
-    </div>
 
-    <h2 id="listTitle">האתרים שלי</h2>
-    <div class="list" id="list"><div class="empty">טוען…</div></div>
+      <a class="docs" href="/docs" target="_blank" rel="noopener">מדריך: איך מוסיפים לאתר תגובות, שיאים, לייקים וטפסים ←</a>
+    </section>
+    <hr>
+
+    <section class="sec">
+      <div class="sec-head"><span class="num">02</span><h2 id="listTitle">האתרים שלי</h2></div>
+      <div class="list" id="list"><div class="empty">טוען…</div></div>
+    </section>
   </div>
-  <p class="small" style="text-align:center;margin-top:40px"><a href="/privacy" style="color:var(--muted)">מדיניות פרטיות</a> · <a href="/terms" style="color:var(--muted)">תנאי שימוש</a></p>
+
+  <footer class="foot">
+    <span>שיגור</span>
+    <a href="/docs">מדריך</a>
+    <a href="/privacy">מדיניות פרטיות</a>
+    <a href="/terms">תנאי שימוש</a>
+  </footer>
 </div>
 
 <script>
@@ -180,7 +256,7 @@ async function api(path, opts={}) {
 async function copy(text, btn){
   try { await navigator.clipboard.writeText(text); }
   catch(e){ const t=document.createElement("textarea"); t.value=text; document.body.appendChild(t); t.select(); try{document.execCommand("copy");}catch(_){} t.remove(); }
-  const o = btn.textContent; btn.textContent = "הועתק ✓"; setTimeout(()=>btn.textContent=o, 1500);
+  const o = btn.textContent; btn.textContent = "הועתק"; setTimeout(()=>btn.textContent=o, 1500);
 }
 
 /* ---------- start ---------- */
@@ -206,7 +282,7 @@ function showLogin(){
   const draw = () => {
     if (!initGoogle()) { setTimeout(draw, 200); return; }
     $("gbtn").innerHTML = "";
-    google.accounts.id.renderButton($("gbtn"), { theme: "filled_black", size: "large", shape: "pill", text: "signin_with", locale: "he", width: 280 });
+    google.accounts.id.renderButton($("gbtn"), { theme: "outline", size: "large", shape: "rectangular", text: "signin_with", locale: "he", width: 280 });
   };
   draw();
 }
@@ -292,7 +368,7 @@ function checkSlug(){
     const r = (await api("/api/slug?s="+encodeURIComponent(s))).data;
     if (!r || r.free === undefined || toSlug($("slug").value) !== s) return;
     slugFree = r.free;
-    h.textContent = r.free ? "✓ הכתובת פנויה: " + ORIGIN + "/s/" + s + "/" : "✗ הכתובת תפוסה, נסו אחרת";
+    h.textContent = r.free ? "הכתובת פנויה: " + ORIGIN + "/s/" + s + "/" : "הכתובת תפוסה, נסו אחרת";
     h.className = "hint " + (r.free ? "ok" : "bad");
   }, 350);
 }
@@ -350,11 +426,11 @@ function showReport(r){
   const R = $("rreport"); R.innerHTML = "";
   if (!r) return;
   if (r.fixes && r.fixes.length) {
-    R.appendChild(el("div", null, "✨ שיפרנו אוטומטית:"));
+    R.appendChild(el("div", null, "שיפרנו אוטומטית"));
     const ul = el("ul"); for (const f of r.fixes) ul.appendChild(el("li", null, f)); R.appendChild(ul);
   }
   if (r.warnings && r.warnings.length) {
-    const t = el("div","w","⚠️ כדאי לבדוק:"); t.style.marginTop = "8px"; R.appendChild(t);
+    const t = el("div","w","כדאי לבדוק"); t.style.marginTop = "8px"; R.appendChild(t);
     const ul = el("ul","w"); for (const w of r.warnings) ul.appendChild(el("li", null, w)); R.appendChild(ul);
   }
 }
@@ -430,7 +506,7 @@ async function toggleData(card, slug){
     const label = document.createElement("span");
     const open = document.createElement("button"); open.className = "lnk"; open.textContent = c.name;
     label.appendChild(open);
-    label.appendChild(document.createTextNode("  ·  " + c.count + (c.name.startsWith("_") ? " · פרטי 🔒" : "")));
+    label.appendChild(document.createTextNode("  ·  " + c.count + (c.name.startsWith("_") ? " · פרטי" : "")));
     const rr = row(label, "מחק אוסף", (b, rw) => confirmBtn(b, "בטוח?", async () => {
       await api("/api/sites/" + slug + "/data/" + encodeURIComponent(c.name), {method:"DELETE"}); rw.remove();
     }));
@@ -438,7 +514,7 @@ async function toggleData(card, slug){
     P.appendChild(rr);
   }
   for (const n of d.counters) {
-    P.appendChild(row("🔢 " + n.name + ": " + n.value, "אפס", (b, rw) => confirmBtn(b, "בטוח?", async () => {
+    P.appendChild(row("מונה " + n.name + ": " + n.value, "אפס", (b, rw) => confirmBtn(b, "בטוח?", async () => {
       await api("/api/sites/" + slug + "/counters/" + encodeURIComponent(n.name), {method:"DELETE"}); rw.remove();
     })));
   }
@@ -470,12 +546,12 @@ async function loadList(){
   const L = $("list"); L.innerHTML = "";
   if (!r.ok) { L.innerHTML = '<div class="empty">לא ניתן לטעון את הרשימה</div>'; return; }
   const sites = r.data.sites || [];
-  if (!sites.length) { L.innerHTML = '<div class="empty">עוד אין אתרים. העלו את הראשון למעלה ☝️</div>'; return; }
+  if (!sites.length) { L.innerHTML = '<div class="empty">עוד אין אתרים. העלו את הראשון למעלה.</div>'; return; }
   for (const s of sites) {
     const el = document.createElement("div"); el.className = "site";
     el.innerHTML = '<div class="info"><div class="name"></div><div class="meta"></div></div>'
-      + '<a class="btn sm" target="_blank" rel="noopener" style="text-decoration:none">פתיחה</a>'
-      + '<button class="btn sm ghost">קישור</button><button class="btn sm ghost">📊</button><a class="btn sm wa" target="_blank" rel="noopener">וואטסאפ</a><button class="btn sm ghost">נתונים</button><button class="btn sm ghost">עדכון</button><button class="btn sm ghost danger">מחיקה</button>'
+      + '<a class="btn sm ghost" target="_blank" rel="noopener">פתיחה</a>'
+      + '<button class="btn sm ghost">קישור</button><button class="btn sm ghost">סטטיסטיקה</button><a class="btn sm ghost wa" target="_blank" rel="noopener">וואטסאפ</a><button class="btn sm ghost">נתונים</button><button class="btn sm ghost">עדכון</button><button class="btn sm ghost danger">מחיקה</button>'
       + (ME && ME.admin && !s.mine ? '<button class="btn sm ghost danger">חסימת המשתמש</button>' : '');
     el.querySelector(".name").textContent = s.name || s.slug;
     el.querySelector(".meta").textContent = "/s/" + s.slug + "/  ·  " + fmtSize(s.size||0) + "  ·  " + fmtDate(s.created);

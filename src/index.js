@@ -451,10 +451,10 @@ export default {
 
     if (p === "/" && req.method === "GET") return adminPage(env);
     if (p === "/docs") {
-      return new Response(DOCS, { headers: { "content-type": "text/html; charset=utf-8", "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'", ...BASE_SEC } });
+      return new Response(DOCS, { headers: { "content-type": "text/html; charset=utf-8", "content-security-policy": "default-src 'none'; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; frame-ancestors 'none'", ...BASE_SEC } });
     }
     if (p === "/privacy" || p === "/terms") {
-      return new Response(p === "/privacy" ? PRIVACY : TERMS, { headers: { "content-type": "text/html; charset=utf-8", "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'", ...BASE_SEC, "x-robots-tag": "index" } });
+      return new Response(p === "/privacy" ? PRIVACY : TERMS, { headers: { "content-type": "text/html; charset=utf-8", "content-security-policy": "default-src 'none'; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; frame-ancestors 'none'", ...BASE_SEC, "x-robots-tag": "index" } });
     }
     if (p === "/robots.txt") return new Response("User-agent: *\nDisallow: /\nAllow: /s/\nAllow: /privacy\nAllow: /terms\nAllow: /docs\n", { headers: { "content-type": "text/plain" } });
 

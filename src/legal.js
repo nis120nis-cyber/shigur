@@ -1,6 +1,19 @@
 const page = (title, body) => `<!DOCTYPE html><html lang="he" dir="rtl"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${title} — שיגור</title>
-<style>body{font-family:system-ui,sans-serif;background:#0d0f14;color:#eef1f6;max-width:720px;margin:0 auto;padding:36px 20px 60px;line-height:1.75}h1{font-size:32px;margin:0 0 6px}h2{font-size:19px;margin:28px 0 6px}a{color:#7cff6b}.muted{color:#8c95a6;font-size:14px}</style></head>
-<body><h1>${title}</h1><div class="muted">עודכן: 15 בנובמבר 2026</div>${body}<p style="margin-top:40px"><a href="/">← חזרה לשיגור</a></p></body></html>`;
+<link href="https://fonts.googleapis.com/css2?family=Frank+Ruhl+Libre:wght@500;700&family=Heebo:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+body{font-family:Heebo,system-ui,sans-serif;background:#F7F6F2;color:#1A1A1A;margin:0;line-height:1.7;font-size:16px;-webkit-font-smoothing:antialiased}
+.wrap{max-width:700px;margin:0 auto;padding:64px 22px 72px}
+.back{font-size:14px;color:#5C5A54;text-decoration:none;border-bottom:1px solid #D6D2CA;padding-bottom:2px}
+h1{font-family:"Frank Ruhl Libre",serif;font-weight:700;font-size:clamp(40px,9vw,60px);line-height:1.05;letter-spacing:-.03em;margin:28px 0 8px}
+h2{font-family:"Frank Ruhl Libre",serif;font-weight:700;font-size:22px;letter-spacing:-.01em;margin:40px 0 6px;padding-top:24px;border-top:1px solid #E5E2DC}
+p,li{color:#2E2C28}
+a{color:#1E463A}
+.muted{color:#5C5A54;font-size:14px}
+code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.9em;background:#F2F0EB;border:1px solid #E5E2DC;border-radius:4px;padding:1px 5px}
+pre{background:#FDFCFA;border:1px solid #E5E2DC;border-radius:6px;padding:16px;overflow-x:auto;font-size:13px;line-height:1.6;text-align:left}
+pre code{background:none;border:0;padding:0;color:#1A1A1A}
+</style></head>
+<body><div class="wrap"><a class="back" href="/">→ חזרה לשיגור</a><h1>${title}</h1><div class="muted">עודכן: 15 בנובמבר 2026</div>${body}</div></body></html>`;
 
 export const PRIVACY = page("מדיניות פרטיות", `
 <h2>מה אנחנו אוספים</h2>
@@ -36,7 +49,6 @@ const esc = s => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&
 const code = s => `<pre dir="ltr"><code>${esc(s.trim())}</code></pre>`;
 
 export const DOCS = page("מסד נתונים לאתר שלך", `
-<style>pre{background:#161a22;border:1px solid #262c38;border-radius:12px;padding:14px;overflow-x:auto;font-size:13px;line-height:1.6;text-align:left}code{font-family:ui-monospace,monospace;color:#cfe8ff}</style>
 <p>כל אתר בשיגור מקבל מסד נתונים משלו. אפשר לשמור בו תגובות, שיאים, הצבעות, לייקים ופניות מטפסים. כל מי שנכנס לאתר רואה את המידע העדכני.</p>
 
 <h2>שלב 1: מוסיפים שורה אחת לאתר</h2>
